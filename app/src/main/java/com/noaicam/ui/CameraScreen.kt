@@ -276,7 +276,7 @@ fun CameraScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(top = 90.dp, bottom = 130.dp),
+                .padding(top = 90.dp, bottom = 145.dp),
             contentAlignment = Alignment.Center
         ) {
             Box(
@@ -402,43 +402,6 @@ fun CameraScreen(
                     }
                 }
 
-                // CAMERA LENS SELECTOR OVERLAY (ON VIEWFINDER BOTTOM-CENTER)
-                if (availableLenses.size > 1) {
-                    Surface(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 12.dp),
-                        color = DarkSurface.copy(alpha = 0.85f),
-                        shape = RoundedCornerShape(20.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, RawGold.copy(alpha = 0.5f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            availableLenses.forEach { lens ->
-                                val isSelected = lens.cameraId == (activeCameraId ?: cameraManager.cameraId)
-                                Surface(
-                                    color = if (isSelected) RawGold else DarkSurfaceVariant,
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.clickable {
-                                        switchCameraLens(lens.cameraId)
-                                    }
-                                ) {
-                                    Text(
-                                        text = lens.label,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) Color.Black else TextPrimary,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
                 // Zoom Ratio Floating Badge
                 if (zoomRatio > 1.05f) {
                     Surface(
@@ -499,7 +462,38 @@ fun CameraScreen(
             }
         }
 
-        // 2. TOP HEADER ROW (FLASH MODE SELECTOR + IDLE SENSOR INFO PILL + ACTION BUTTONS)
+        // 2. CAMERA LENS / ANGLE SELECTOR BAR (PLACED STRICTLY OUTSIDE PREVIEW IMAGE: BELOW PREVIEW, ABOVE BOTTOM BAR)
+        if (availableLenses.size > 1) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 105.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                availableLenses.forEach { lens ->
+                    val isSelected = lens.cameraId == (activeCameraId ?: cameraManager.cameraId)
+                    Surface(
+                        color = if (isSelected) RawGold else DarkSurfaceVariant,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.clickable {
+                            switchCameraLens(lens.cameraId)
+                        }
+                    ) {
+                        Text(
+                            text = lens.label,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSelected) Color.Black else TextPrimary,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. TOP HEADER ROW (FLASH MODE SELECTOR + IDLE SENSOR INFO PILL + ACTION BUTTONS)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -632,7 +626,7 @@ fun CameraScreen(
             }
         }
 
-        // 3. FLOATING MANUAL EXPOSURE SELECTOR DRAWER
+        // 4. FLOATING MANUAL EXPOSURE SELECTOR DRAWER
         AnimatedVisibility(
             visible = showManualAeDrawer,
             enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
@@ -736,7 +730,7 @@ fun CameraScreen(
             }
         }
 
-        // 4. FLOATING LIVE DEVELOPMENT PARAMETERS DRAWER
+        // 5. FLOATING LIVE DEVELOPMENT PARAMETERS DRAWER
         AnimatedVisibility(
             visible = showSliders,
             enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
@@ -922,7 +916,7 @@ fun CameraScreen(
             }
         }
 
-        // 5. FLOATING PROCESSING PROGRESS OVERLAY BANNER
+        // 6. FLOATING PROCESSING PROGRESS OVERLAY BANNER
         if (isCapturing) {
             Surface(
                 modifier = Modifier
@@ -959,7 +953,7 @@ fun CameraScreen(
             }
         }
 
-        // 6. BOTTOM CONTROLS BAR
+        // 7. BOTTOM CONTROLS BAR
         Box(
             modifier = Modifier
                 .fillMaxWidth()
