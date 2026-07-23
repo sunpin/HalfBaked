@@ -7,6 +7,8 @@ import android.graphics.Rect
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.params.MeteringRectangle
+import android.hardware.camera2.params.OutputConfiguration
+import android.hardware.camera2.params.SessionConfiguration
 import android.hardware.camera2.params.StreamConfigurationMap
 import android.media.Image
 import android.media.ImageReader
@@ -21,6 +23,7 @@ import com.noaicam.data.FlashMode
 import com.noaicam.data.RawImageData
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
@@ -59,6 +62,8 @@ class Camera2RawManager(private val context: Context) {
         private set
     var activeLensId: String = "WIDE"
         private set
+    private var targetPhysicalCameraId: String? = null
+
     var isRawSupported: Boolean = false
         private set
     var currentIso: Int = 100
@@ -120,8 +125,26 @@ class Camera2RawManager(private val context: Context) {
                     } else null
 
                     val minZ = zoomRange?.lower ?: 1.0f
-                    if (minZ <= 0.6f) {
-                        list.add(CameraLensInfo("ULTRA_WIDE", "超広角 (0.5x)", CameraCharacteristics.LENS_FACING_BACK, minZ))
+
+                    // Check physical camera IDs for physical Ultrawide
+                    var hasPhysicalUltrawide = false
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        for (pId in chars.physicalCameraIds) {
+                            try {
+                                val pChars = cameraManager.getCameraCharacteristics(pId)
+                                val focal = pChars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 4.0f
+                                if (focal < 3.0f) {
+                                    hasPhysicalUltrawide = true
+                                    break
+                                }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error checking physical camera $pId", e)
+                            }
+                        }
+                    }
+
+                    if (minZ <= 0.6f || hasPhysicalUltrawide) {
+                        list.add(CameraLensInfo("ULTRA_WIDE", "超広角 (0.5x)", CameraCharacteristics.LENS_FACING_BACK, if (minZ <= 0.6f) minZ else 0.5f))
                     }
                     list.add(CameraLensInfo("WIDE", "広角 (1x)", CameraCharacteristics.LENS_FACING_BACK, 1.0f))
                 } else if (facing == CameraCharacteristics.LENS_FACING_FRONT) {
@@ -173,6 +196,7 @@ class Camera2RawManager(private val context: Context) {
 
             cleanResourcesWithoutLock()
             activeLensId = targetLensId
+            targetPhysicalCameraId = null
 
             val wantFront = (targetLensId == "FRONT")
             val desiredFacing = if (wantFront) CameraCharacteristics.LENS_FACING_FRONT else CameraCharacteristics.LENS_FACING_BACK
@@ -195,6 +219,25 @@ class Camera2RawManager(private val context: Context) {
             val characteristics = cameraCharacteristics ?: run {
                 cameraOpenCloseLock.release()
                 return
+            }
+
+            // Find physical camera ID for Ultrawide or Wide if available
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && characteristics.physicalCameraIds.isNotEmpty()) {
+                for (pId in characteristics.physicalCameraIds) {
+                    try {
+                        val pChars = cameraManager.getCameraCharacteristics(pId)
+                        val focal = pChars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 4.0f
+                        if (targetLensId == "ULTRA_WIDE" && focal < 3.0f) {
+                            targetPhysicalCameraId = pId
+                            break
+                        } else if (targetLensId == "WIDE" && focal >= 3.0f) {
+                            targetPhysicalCameraId = pId
+                            break
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error inspecting physical camera $pId", e)
+                    }
+                }
             }
 
             val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
@@ -275,20 +318,64 @@ class Camera2RawManager(private val context: Context) {
     private fun createCaptureSession(previewSurface: Surface) {
         val device = cameraDevice ?: return
         previewSurfaceRef = previewSurface
-        val surfaces = mutableListOf(previewSurface)
 
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val outputConfigs = mutableListOf<OutputConfiguration>()
+
+                val previewConfig = OutputConfiguration(previewSurface)
+                targetPhysicalCameraId?.let { previewConfig.setPhysicalCameraId(it) }
+                outputConfigs.add(previewConfig)
+
+                rawImageReader?.surface?.let {
+                    val rawConfig = OutputConfiguration(it)
+                    targetPhysicalCameraId?.let { pid -> rawConfig.setPhysicalCameraId(pid) }
+                    outputConfigs.add(rawConfig)
+                }
+
+                jpegFallbackReader?.surface?.let {
+                    val jpgConfig = OutputConfiguration(it)
+                    targetPhysicalCameraId?.let { pid -> jpgConfig.setPhysicalCameraId(pid) }
+                    outputConfigs.add(jpgConfig)
+                }
+
+                val executor = Executors.newSingleThreadExecutor()
+                val sessionConfig = SessionConfiguration(
+                    SessionConfiguration.SESSION_REGULAR,
+                    outputConfigs,
+                    executor,
+                    object : CameraCaptureSession.StateCallback() {
+                        override fun onConfigured(session: CameraCaptureSession) {
+                            if (cameraDevice == null) return
+                            captureSession = session
+                            updatePreviewSession()
+                        }
+
+                        override fun onConfigureFailed(session: CameraCaptureSession) {
+                            Log.w(TAG, "Physical camera OutputConfiguration session failed, falling back...")
+                            createFallbackCaptureSession(previewSurface)
+                        }
+                    }
+                )
+                device.createCaptureSession(sessionConfig)
+                return
+            }
+
+            createFallbackCaptureSession(previewSurface)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating capture session with OutputConfiguration, falling back", e)
+            createFallbackCaptureSession(previewSurface)
+        }
+    }
+
+    private fun createFallbackCaptureSession(previewSurface: Surface) {
+        val device = cameraDevice ?: return
+        val surfaces = mutableListOf(previewSurface)
         rawImageReader?.surface?.let { surfaces.add(it) }
         jpegFallbackReader?.surface?.let { surfaces.add(it) }
 
         try {
-            val previewRequestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-            previewRequestBuilder.addTarget(previewSurface)
-
-            applyExposureControl(previewRequestBuilder)
-            applyFlashControl(previewRequestBuilder, isStillCapture = false)
-            applyZoom(previewRequestBuilder)
-            previewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-
             device.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(session: CameraCaptureSession) {
                     if (cameraDevice == null) return
@@ -297,25 +384,11 @@ class Camera2RawManager(private val context: Context) {
                 }
 
                 override fun onConfigureFailed(session: CameraCaptureSession) {
-                    Log.w(TAG, "Full session configuration failed, falling back to preview-only session...")
-                    try {
-                        device.createCaptureSession(listOf(previewSurface), object : CameraCaptureSession.StateCallback() {
-                            override fun onConfigured(s: CameraCaptureSession) {
-                                captureSession = s
-                                updatePreviewSession()
-                            }
-                            override fun onConfigureFailed(s: CameraCaptureSession) {
-                                Log.e(TAG, "Fallback session also failed.")
-                            }
-                        }, backgroundHandler)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error creating fallback capture session", e)
-                    }
+                    Log.e(TAG, "Fallback session failed")
                 }
             }, backgroundHandler)
-
         } catch (e: Exception) {
-            Log.e(TAG, "Error creating capture session", e)
+            Log.e(TAG, "Error in createFallbackCaptureSession", e)
         }
     }
 
@@ -410,8 +483,8 @@ class Camera2RawManager(private val context: Context) {
                                 CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN,
                                 CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN -> postFocusStatus(FocusStatus.SEARCHING)
 
-                                CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED,
-                                CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED -> postFocusStatus(FocusStatus.LOCKED)
+                                CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED,
+                                CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED -> postFocusStatus(FocusStatus.LOCKED)
 
                                 CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED -> postFocusStatus(FocusStatus.FAILED)
                             }
