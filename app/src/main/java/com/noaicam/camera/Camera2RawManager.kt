@@ -30,9 +30,10 @@ enum class FocusStatus {
 }
 
 data class CameraLensInfo(
-    val cameraId: String,
+    val id: String,
     val label: String,
-    val facing: Int
+    val zoomRatio: Float,
+    val isFront: Boolean
 )
 
 class Camera2RawManager(private val context: Context) {
@@ -67,6 +68,8 @@ class Camera2RawManager(private val context: Context) {
 
     // Zoom state
     var maxZoomRatio: Float = 8.0f
+        private set
+    var minZoomRatio: Float = 1.0f
         private set
     var currentZoomRatio: Float = 1.0f
         private set
@@ -106,23 +109,37 @@ class Camera2RawManager(private val context: Context) {
         val list = mutableListOf<CameraLensInfo>()
         try {
             for (id in cameraManager.cameraIdList) {
-                val characteristics = cameraManager.getCameraCharacteristics(id)
-                val facing = characteristics.get(CameraCharacteristics.LENS_FACING) ?: CameraCharacteristics.LENS_FACING_BACK
-                val focalLengths = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-                val focal = focalLengths?.firstOrNull() ?: 4.0f
+                val chars = cameraManager.getCameraCharacteristics(id)
+                val facing = chars.get(CameraCharacteristics.LENS_FACING)
 
-                val label = when {
-                    facing == CameraCharacteristics.LENS_FACING_FRONT -> "前面 (インカメラ)"
-                    focal < 3.0f -> "超広角 (0.5x)"
-                    focal > 6.0f -> "望遠 (3x)"
-                    else -> "広角 (1x)"
+                if (facing == CameraCharacteristics.LENS_FACING_BACK) {
+                    val zoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                    } else null
+
+                    val minZ = zoomRange?.lower ?: 1.0f
+                    val maxZ = zoomRange?.upper ?: 8.0f
+
+                    if (minZ <= 0.6f) {
+                        list.add(CameraLensInfo("0.5x", "超広角 (0.5x)", 0.5f, false))
+                    }
+                    list.add(CameraLensInfo("1.0x", "広角 (1x)", 1.0f, false))
+                    if (maxZ >= 3.0f) {
+                        list.add(CameraLensInfo("3.0x", "望遠 (3x)", 3.0f, false))
+                    }
+                } else if (facing == CameraCharacteristics.LENS_FACING_FRONT) {
+                    list.add(CameraLensInfo("FRONT", "前面 (インカメラ)", 1.0f, true))
                 }
-                list.add(CameraLensInfo(id, "$label [Cam $id]", facing))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error getting camera list", e)
         }
-        return list.distinctBy { it.label }
+
+        if (list.isEmpty()) {
+            list.add(CameraLensInfo("1.0x", "広角 (1x)", 1.0f, false))
+        }
+
+        return list.distinctBy { it.id }
     }
 
     fun startBackgroundThread() {
@@ -144,7 +161,12 @@ class Camera2RawManager(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    fun openCamera(surfaceTexture: SurfaceTexture, width: Int, height: Int, targetCameraId: String? = null) {
+    fun openCamera(
+        surfaceTexture: SurfaceTexture,
+        width: Int,
+        height: Int,
+        targetLensId: String? = "1.0x"
+    ) {
         startBackgroundThread()
 
         try {
@@ -154,23 +176,22 @@ class Camera2RawManager(private val context: Context) {
 
             cleanResourcesWithoutLock()
 
-            if (targetCameraId != null && cameraManager.cameraIdList.contains(targetCameraId)) {
-                cameraId = targetCameraId
-                cameraCharacteristics = cameraManager.getCameraCharacteristics(targetCameraId)
-            } else {
-                for (id in cameraManager.cameraIdList) {
-                    val characteristics = cameraManager.getCameraCharacteristics(id)
-                    val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
-                    if (facing == CameraCharacteristics.LENS_FACING_BACK) {
-                        cameraId = id
-                        cameraCharacteristics = characteristics
-                        break
-                    }
+            val wantFront = targetLensId == "FRONT"
+            val desiredFacing = if (wantFront) CameraCharacteristics.LENS_FACING_FRONT else CameraCharacteristics.LENS_FACING_BACK
+
+            for (id in cameraManager.cameraIdList) {
+                val characteristics = cameraManager.getCameraCharacteristics(id)
+                val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
+                if (facing == desiredFacing) {
+                    cameraId = id
+                    cameraCharacteristics = characteristics
+                    break
                 }
-                if (cameraId == null && cameraManager.cameraIdList.isNotEmpty()) {
-                    cameraId = cameraManager.cameraIdList[0]
-                    cameraCharacteristics = cameraManager.getCameraCharacteristics(cameraId!!)
-                }
+            }
+
+            if (cameraId == null && cameraManager.cameraIdList.isNotEmpty()) {
+                cameraId = cameraManager.cameraIdList[0]
+                cameraCharacteristics = cameraManager.getCameraCharacteristics(cameraId!!)
             }
 
             val characteristics = cameraCharacteristics ?: run {
@@ -184,11 +205,20 @@ class Camera2RawManager(private val context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val range = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
                 if (range != null) {
+                    minZoomRatio = range.lower
                     maxZoomRatio = Math.min(range.upper, 10.0f)
                 }
             } else {
                 val maxZoom = characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 8.0f
+                minZoomRatio = 1.0f
                 maxZoomRatio = Math.min(maxZoom, 10.0f)
+            }
+
+            // Apply lens zoom ratio
+            currentZoomRatio = when (targetLensId) {
+                "0.5x" -> 0.5f.coerceAtLeast(minZoomRatio)
+                "3.0x" -> 3.0f.coerceAtMost(maxZoomRatio)
+                else -> 1.0f.coerceIn(minZoomRatio, maxZoomRatio)
             }
 
             val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
@@ -342,7 +372,7 @@ class Camera2RawManager(private val context: Context) {
     }
 
     fun setZoomRatio(zoomRatio: Float) {
-        currentZoomRatio = zoomRatio.coerceIn(1.0f, maxZoomRatio)
+        currentZoomRatio = zoomRatio.coerceIn(minZoomRatio, maxZoomRatio)
         updatePreviewSession()
     }
 

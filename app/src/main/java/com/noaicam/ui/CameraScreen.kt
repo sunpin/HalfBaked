@@ -97,7 +97,7 @@ fun CameraScreen(
 
     // Multi-Camera Lens Selection State
     var availableLenses by remember { mutableStateOf<List<CameraLensInfo>>(emptyList()) }
-    var activeCameraId by remember { mutableStateOf(settingsManager.selectedCameraId) }
+    var activeLensId by remember { mutableStateOf(settingsManager.selectedCameraId ?: "1.0x") }
 
     // PERSISTENT USER SETTINGS
     var showGrid by remember { mutableStateOf(settingsManager.showGrid) }
@@ -180,14 +180,14 @@ fun CameraScreen(
     }
 
     // Function to switch camera lens
-    fun switchCameraLens(newCameraId: String) {
-        activeCameraId = newCameraId
-        settingsManager.selectedCameraId = newCameraId
+    fun switchCameraLens(lensId: String) {
+        activeLensId = lensId
+        settingsManager.selectedCameraId = lensId
         val tv = textureViewRef
         if (tv != null && tv.isAvailable) {
             val surface = tv.surfaceTexture
             if (surface != null) {
-                cameraManager.openCamera(surface, tv.width, tv.height, newCameraId)
+                cameraManager.openCamera(surface, tv.width, tv.height, lensId)
                 cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                 cameraManager.setFlashMode(flashMode)
                 isRawHardwareSupported = cameraManager.isRawSupported
@@ -210,7 +210,7 @@ fun CameraScreen(
                     if (tv != null && tv.isAvailable) {
                         val surface = tv.surfaceTexture
                         if (surface != null) {
-                            cameraManager.openCamera(surface, tv.width, tv.height, activeCameraId)
+                            cameraManager.openCamera(surface, tv.width, tv.height, activeLensId)
                             cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                             cameraManager.setFlashMode(flashMode)
                             isRawHardwareSupported = cameraManager.isRawSupported
@@ -329,7 +329,7 @@ fun CameraScreen(
                                     width: Int,
                                     height: Int
                                 ) {
-                                    cameraManager.openCamera(surface, width, height, activeCameraId)
+                                    cameraManager.openCamera(surface, width, height, activeLensId)
                                     cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                                     cameraManager.setFlashMode(flashMode)
                                     isRawHardwareSupported = cameraManager.isRawSupported
@@ -473,12 +473,12 @@ fun CameraScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 availableLenses.forEach { lens ->
-                    val isSelected = lens.cameraId == (activeCameraId ?: cameraManager.cameraId)
+                    val isSelected = lens.id == activeLensId
                     Surface(
                         color = if (isSelected) RawGold else DarkSurfaceVariant,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.clickable {
-                            switchCameraLens(lens.cameraId)
+                            switchCameraLens(lens.id)
                         }
                     ) {
                         Text(
