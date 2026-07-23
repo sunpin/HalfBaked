@@ -30,9 +30,10 @@ enum class FocusStatus {
 }
 
 data class CameraLensInfo(
-    val cameraId: String,
+    val lensId: String,
     val label: String,
-    val isFront: Boolean
+    val targetFacing: Int,
+    val targetZoomRatio: Float
 )
 
 class Camera2RawManager(private val context: Context) {
@@ -55,6 +56,8 @@ class Camera2RawManager(private val context: Context) {
     private val cameraOpenCloseLock = Semaphore(1)
 
     var cameraId: String? = null
+        private set
+    var activeLensId: String = "WIDE"
         private set
     var isRawSupported: Boolean = false
         private set
@@ -107,32 +110,22 @@ class Camera2RawManager(private val context: Context) {
     fun getAvailableCameras(): List<CameraLensInfo> {
         val list = mutableListOf<CameraLensInfo>()
         try {
-            val allCameraIds = mutableListOf<String>()
             for (id in cameraManager.cameraIdList) {
-                allCameraIds.add(id)
                 val chars = cameraManager.getCameraCharacteristics(id)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    allCameraIds.addAll(chars.physicalCameraIds)
-                }
-            }
+                val facing = chars.get(CameraCharacteristics.LENS_FACING)
 
-            for (id in allCameraIds.distinct()) {
-                try {
-                    val chars = cameraManager.getCameraCharacteristics(id)
-                    val facing = chars.get(CameraCharacteristics.LENS_FACING) ?: continue
-                    val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-                    val focal = focalLengths?.firstOrNull() ?: 4.0f
+                if (facing == CameraCharacteristics.LENS_FACING_BACK) {
+                    val zoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+                    } else null
 
-                    val isFront = (facing == CameraCharacteristics.LENS_FACING_FRONT)
-                    val label = when {
-                        isFront -> "前面 (インカメラ)"
-                        focal < 3.0f -> "超広角 (0.5x)"
-                        else -> "広角 (1x)"
+                    val minZ = zoomRange?.lower ?: 1.0f
+                    if (minZ <= 0.6f) {
+                        list.add(CameraLensInfo("ULTRA_WIDE", "超広角 (0.5x)", CameraCharacteristics.LENS_FACING_BACK, minZ))
                     }
-
-                    list.add(CameraLensInfo(id, label, isFront))
-                } catch (e: Exception) {
-                    Log.w(TAG, "Skip camera id $id", e)
+                    list.add(CameraLensInfo("WIDE", "広角 (1x)", CameraCharacteristics.LENS_FACING_BACK, 1.0f))
+                } else if (facing == CameraCharacteristics.LENS_FACING_FRONT) {
+                    list.add(CameraLensInfo("FRONT", "前面 (インカメラ)", CameraCharacteristics.LENS_FACING_FRONT, 1.0f))
                 }
             }
         } catch (e: Exception) {
@@ -140,10 +133,10 @@ class Camera2RawManager(private val context: Context) {
         }
 
         if (list.isEmpty()) {
-            list.add(CameraLensInfo("0", "広角 (1x)", false))
+            list.add(CameraLensInfo("WIDE", "広角 (1x)", CameraCharacteristics.LENS_FACING_BACK, 1.0f))
         }
 
-        return list.distinctBy { it.label }
+        return list.distinctBy { it.lensId }
     }
 
     fun startBackgroundThread() {
@@ -169,7 +162,7 @@ class Camera2RawManager(private val context: Context) {
         surfaceTexture: SurfaceTexture,
         width: Int,
         height: Int,
-        targetCameraId: String? = null
+        targetLensId: String = "WIDE"
     ) {
         startBackgroundThread()
 
@@ -179,24 +172,24 @@ class Camera2RawManager(private val context: Context) {
             }
 
             cleanResourcesWithoutLock()
+            activeLensId = targetLensId
 
-            if (targetCameraId != null && isCameraIdValid(targetCameraId)) {
-                cameraId = targetCameraId
-                cameraCharacteristics = cameraManager.getCameraCharacteristics(targetCameraId)
-            } else {
-                for (id in cameraManager.cameraIdList) {
-                    val characteristics = cameraManager.getCameraCharacteristics(id)
-                    val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
-                    if (facing == CameraCharacteristics.LENS_FACING_BACK) {
-                        cameraId = id
-                        cameraCharacteristics = characteristics
-                        break
-                    }
+            val wantFront = (targetLensId == "FRONT")
+            val desiredFacing = if (wantFront) CameraCharacteristics.LENS_FACING_FRONT else CameraCharacteristics.LENS_FACING_BACK
+
+            for (id in cameraManager.cameraIdList) {
+                val characteristics = cameraManager.getCameraCharacteristics(id)
+                val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
+                if (facing == desiredFacing) {
+                    cameraId = id
+                    cameraCharacteristics = characteristics
+                    break
                 }
-                if (cameraId == null && cameraManager.cameraIdList.isNotEmpty()) {
-                    cameraId = cameraManager.cameraIdList[0]
-                    cameraCharacteristics = cameraManager.getCameraCharacteristics(cameraId!!)
-                }
+            }
+
+            if (cameraId == null && cameraManager.cameraIdList.isNotEmpty()) {
+                cameraId = cameraManager.cameraIdList[0]
+                cameraCharacteristics = cameraManager.getCameraCharacteristics(cameraId!!)
             }
 
             val characteristics = cameraCharacteristics ?: run {
@@ -219,7 +212,10 @@ class Camera2RawManager(private val context: Context) {
                 maxZoomRatio = Math.min(maxZoom, 10.0f)
             }
 
-            currentZoomRatio = 1.0f.coerceIn(minZoomRatio, maxZoomRatio)
+            currentZoomRatio = when (targetLensId) {
+                "ULTRA_WIDE" -> minZoomRatio
+                else -> 1.0f.coerceIn(minZoomRatio, maxZoomRatio)
+            }
 
             val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             setupImageReaders(map)
@@ -252,21 +248,6 @@ class Camera2RawManager(private val context: Context) {
             cameraOpenCloseLock.release()
             Log.e(TAG, "Error opening camera", e)
         }
-    }
-
-    private fun isCameraIdValid(targetId: String): Boolean {
-        try {
-            if (cameraManager.cameraIdList.contains(targetId)) return true
-            for (id in cameraManager.cameraIdList) {
-                val chars = cameraManager.getCameraCharacteristics(id)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    if (chars.physicalCameraIds.contains(targetId)) return true
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error checking camera id validity", e)
-        }
-        return false
     }
 
     private fun setupImageReaders(map: StreamConfigurationMap?) {

@@ -97,7 +97,7 @@ fun CameraScreen(
 
     // Multi-Camera Lens Selection State
     var availableLenses by remember { mutableStateOf<List<CameraLensInfo>>(emptyList()) }
-    var activeLensId by remember { mutableStateOf(settingsManager.selectedCameraId) }
+    var activeLensId by remember { mutableStateOf(settingsManager.selectedCameraId ?: "WIDE") }
 
     // PERSISTENT USER SETTINGS
     var showGrid by remember { mutableStateOf(settingsManager.showGrid) }
@@ -178,21 +178,21 @@ fun CameraScreen(
     LaunchedEffect(Unit) {
         val lenses = cameraManager.getAvailableCameras()
         availableLenses = lenses
-        if (activeLensId == null && lenses.isNotEmpty()) {
-            activeLensId = lenses[0].cameraId
-            settingsManager.selectedCameraId = lenses[0].cameraId
+        if (settingsManager.selectedCameraId == null && lenses.isNotEmpty()) {
+            activeLensId = lenses[0].lensId
+            settingsManager.selectedCameraId = lenses[0].lensId
         }
     }
 
     // Function to switch camera lens
-    fun switchCameraLens(camId: String) {
-        activeLensId = camId
-        settingsManager.selectedCameraId = camId
+    fun switchCameraLens(lensId: String) {
+        activeLensId = lensId
+        settingsManager.selectedCameraId = lensId
         val tv = textureViewRef
         if (tv != null && tv.isAvailable) {
             val surface = tv.surfaceTexture
             if (surface != null) {
-                cameraManager.openCamera(surface, tv.width, tv.height, camId)
+                cameraManager.openCamera(surface, tv.width, tv.height, lensId)
                 cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                 cameraManager.setFlashMode(flashMode)
                 isRawHardwareSupported = cameraManager.isRawSupported
@@ -478,12 +478,12 @@ fun CameraScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 availableLenses.forEach { lens ->
-                    val isSelected = (lens.cameraId == activeLensId)
+                    val isSelected = (lens.lensId == activeLensId)
                     Surface(
                         color = if (isSelected) RawGold else DarkSurfaceVariant,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.clickable {
-                            switchCameraLens(lens.cameraId)
+                            switchCameraLens(lens.lensId)
                         }
                     ) {
                         Text(
