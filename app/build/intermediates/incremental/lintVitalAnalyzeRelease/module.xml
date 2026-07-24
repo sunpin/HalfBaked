@@ -1,0 +1,19 @@
+<lint-module
+    format="1"
+    dir="C:\work\sunpin\NOAICAM\app"
+    name=":app"
+    type="APP"
+    maven="NOAICAM:app:"
+    agpVersion="8.2.2"
+    buildFolder="build"
+    bootClassPath="C:\Users\meson\AppData\Local\Android\Sdk\platforms\android-34\android.jar;C:\Users\meson\AppData\Local\Android\Sdk\build-tools\34.0.0\core-lambda-stubs.jar"
+    javaSourceLevel="1.8"
+    compileTarget="android-34"
+    neverShrinking="true">
+  <lintOptions
+      abortOnError="true"
+      absolutePaths="true"
+      checkReleaseBuilds="true"
+      explainIssues="true"/>
+  <variant name="release"/>
+</lint-module>
