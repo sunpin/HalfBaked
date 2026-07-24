@@ -79,6 +79,9 @@ class Camera2RawManager(private val context: Context) {
     var sensorAspectRatio: Float = 4f / 3f
         private set
 
+    var previewSize: Size = Size(1920, 1440)
+        private set
+
     // Zoom state
     var maxZoomRatio: Float = 8.0f
         private set
@@ -293,9 +296,9 @@ class Camera2RawManager(private val context: Context) {
             currentZoomRatio = 1.0f.coerceIn(minZoomRatio, maxZoomRatio)
 
             val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-            setupImageReaders(map)
+            setupImageReadersAndPreviewSize(map)
 
-            surfaceTexture.setDefaultBufferSize(width, height)
+            surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
             val previewSurface = Surface(surfaceTexture)
 
             cameraManager.openCamera(cameraId!!, object : CameraDevice.StateCallback() {
@@ -325,7 +328,7 @@ class Camera2RawManager(private val context: Context) {
         }
     }
 
-    private fun setupImageReaders(map: StreamConfigurationMap?) {
+    private fun setupImageReadersAndPreviewSize(map: StreamConfigurationMap?) {
         if (map == null) return
 
         if (isRawSupported) {
@@ -343,6 +346,15 @@ class Camera2RawManager(private val context: Context) {
             )
             sensorAspectRatio = max(largestJpeg.width, largestJpeg.height).toFloat() / Math.min(largestJpeg.width, largestJpeg.height).toFloat()
         }
+
+        // Select optimal SurfaceTexture preview size matching sensor aspect ratio (4:3)
+        val previewSizes = map.getOutputSizes(SurfaceTexture::class.java)
+        previewSize = previewSizes?.filter {
+            val aspect = max(it.width, it.height).toFloat() / Math.min(it.width, it.height).toFloat()
+            Math.abs(aspect - sensorAspectRatio) < 0.08f
+        }?.maxByOrNull { it.width * it.height }
+            ?: previewSizes?.maxByOrNull { it.width * it.height }
+            ?: Size(1920, 1440)
     }
 
     private var previewSurfaceRef: Surface? = null
@@ -496,6 +508,8 @@ class Camera2RawManager(private val context: Context) {
             applyFlashControl(builder, isStillCapture = false)
             applyZoom(builder)
             builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+            builder.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
 
             session.setRepeatingRequest(
                 builder.build(),
