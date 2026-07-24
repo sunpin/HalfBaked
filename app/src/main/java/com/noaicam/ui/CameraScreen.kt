@@ -108,7 +108,7 @@ fun CameraScreen(
     var selectedShutterNanos by remember { mutableLongStateOf(settingsManager.manualShutterNanos) }
     var developParams by remember { mutableStateOf(settingsManager.getDevelopParams()) }
 
-    // Pinch-to-Zoom State
+    // Pinch-to-Zoom State (Preserved across library transitions)
     var zoomRatio by remember { mutableFloatStateOf(1.0f) }
 
     var showManualAeDrawer by remember { mutableStateOf(false) }
@@ -184,15 +184,18 @@ fun CameraScreen(
         }
     }
 
-    // Function to switch camera lens
+    // Function to switch camera lens (Resets zoom to 1.0f when changing lens)
     fun switchCameraLens(lensId: String) {
         activeLensId = lensId
         settingsManager.selectedCameraId = lensId
+        zoomRatio = 1.0f // Reset zoom when switching cameras!
+
         val tv = textureViewRef
         if (tv != null && tv.isAvailable) {
             val surface = tv.surfaceTexture
             if (surface != null) {
                 cameraManager.openCamera(surface, tv.width, tv.height, lensId)
+                cameraManager.setZoomRatio(1.0f)
                 cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                 cameraManager.setFlashMode(flashMode)
                 isRawHardwareSupported = cameraManager.isRawSupported
@@ -203,7 +206,7 @@ fun CameraScreen(
     // Last Captured Developed JPG Thumbnail
     var lastSavedThumbnail by remember { mutableStateOf<Bitmap?>(null) }
 
-    // App Resume / Lifecycle Manager
+    // App Resume / Lifecycle Manager (Restores previous zoom when returning from library/pause)
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -216,6 +219,7 @@ fun CameraScreen(
                         val surface = tv.surfaceTexture
                         if (surface != null) {
                             cameraManager.openCamera(surface, tv.width, tv.height, activeLensId)
+                            cameraManager.setZoomRatio(zoomRatio) // Restore previous zoom!
                             cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                             cameraManager.setFlashMode(flashMode)
                             isRawHardwareSupported = cameraManager.isRawSupported
@@ -335,6 +339,7 @@ fun CameraScreen(
                                     height: Int
                                 ) {
                                     cameraManager.openCamera(surface, width, height, activeLensId)
+                                    cameraManager.setZoomRatio(zoomRatio)
                                     cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                                     cameraManager.setFlashMode(flashMode)
                                     isRawHardwareSupported = cameraManager.isRawSupported
@@ -544,6 +549,7 @@ fun CameraScreen(
                 Surface(
                     modifier = Modifier
                         .clickable {
+                            showSliders = false
                             showManualAeDrawer = !showManualAeDrawer
                         },
                     color = DarkSurface.copy(alpha = 0.90f),
@@ -598,7 +604,10 @@ fun CameraScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
-                        onClick = { showSliders = !showSliders },
+                        onClick = {
+                            showManualAeDrawer = false
+                            showSliders = !showSliders
+                        },
                         modifier = Modifier
                             .size(38.dp)
                             .clip(CircleShape)
@@ -631,7 +640,21 @@ fun CameraScreen(
             }
         }
 
-        // 4. FLOATING MANUAL EXPOSURE SELECTOR DRAWER
+        // 4. SCRIM OVERLAY FOR CLOSING MENUS WHEN CLICKING OUTSIDE (Swallows click so underlying elements aren't triggered)
+        if (showManualAeDrawer || showSliders) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures {
+                            showManualAeDrawer = false
+                            showSliders = false
+                        }
+                    }
+            )
+        }
+
+        // 5. FLOATING MANUAL EXPOSURE SELECTOR DRAWER
         AnimatedVisibility(
             visible = showManualAeDrawer,
             enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
@@ -735,7 +758,7 @@ fun CameraScreen(
             }
         }
 
-        // 5. FLOATING LIVE DEVELOPMENT PARAMETERS DRAWER
+        // 6. FLOATING LIVE DEVELOPMENT PARAMETERS DRAWER
         AnimatedVisibility(
             visible = showSliders,
             enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
@@ -921,7 +944,7 @@ fun CameraScreen(
             }
         }
 
-        // 6. FLOATING PROCESSING PROGRESS OVERLAY BANNER
+        // 7. FLOATING PROCESSING PROGRESS OVERLAY BANNER
         if (isCapturing) {
             Surface(
                 modifier = Modifier
@@ -958,7 +981,7 @@ fun CameraScreen(
             }
         }
 
-        // 7. BOTTOM CONTROLS BAR
+        // 8. BOTTOM CONTROLS BAR
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1037,7 +1060,10 @@ fun CameraScreen(
 
             // Settings Toggle Button (Right)
             IconButton(
-                onClick = { showSliders = !showSliders },
+                onClick = {
+                    showManualAeDrawer = false
+                    showSliders = !showSliders
+                },
                 modifier = Modifier
                     .size(52.dp)
                     .align(Alignment.CenterEnd)

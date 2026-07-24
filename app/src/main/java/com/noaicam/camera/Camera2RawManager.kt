@@ -126,7 +126,6 @@ class Camera2RawManager(private val context: Context) {
 
                     val minZ = zoomRange?.lower ?: 1.0f
 
-                    // Check physical camera IDs for physical Ultrawide
                     var hasPhysicalUltrawide = false
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                         for (pId in chars.physicalCameraIds) {
@@ -216,14 +215,14 @@ class Camera2RawManager(private val context: Context) {
                 cameraCharacteristics = cameraManager.getCameraCharacteristics(cameraId!!)
             }
 
-            val characteristics = cameraCharacteristics ?: run {
+            val logicalChars = cameraCharacteristics ?: run {
                 cameraOpenCloseLock.release()
                 return
             }
 
-            // Find physical camera ID for Ultrawide or Wide if available
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && characteristics.physicalCameraIds.isNotEmpty()) {
-                for (pId in characteristics.physicalCameraIds) {
+            // Inspect physical camera IDs to bind the exact physical sensor (Wide vs Ultrawide)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && logicalChars.physicalCameraIds.isNotEmpty()) {
+                for (pId in logicalChars.physicalCameraIds) {
                     try {
                         val pChars = cameraManager.getCameraCharacteristics(pId)
                         val focal = pChars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull() ?: 4.0f
@@ -240,6 +239,15 @@ class Camera2RawManager(private val context: Context) {
                 }
             }
 
+            // Use physical camera characteristics if physical ID was bound
+            if (targetPhysicalCameraId != null) {
+                cameraCharacteristics = cameraManager.getCameraCharacteristics(targetPhysicalCameraId!!)
+            }
+
+            val characteristics = cameraCharacteristics!!
+
+            Log.d("NOAICAM_DEBUG", "openCamera: targetLensId=$targetLensId, cameraId=$cameraId, targetPhysicalCameraId=$targetPhysicalCameraId")
+
             val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
             isRawSupported = capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW)
 
@@ -255,10 +263,7 @@ class Camera2RawManager(private val context: Context) {
                 maxZoomRatio = Math.min(maxZoom, 10.0f)
             }
 
-            currentZoomRatio = when (targetLensId) {
-                "ULTRA_WIDE" -> minZoomRatio
-                else -> 1.0f.coerceIn(minZoomRatio, maxZoomRatio)
-            }
+            currentZoomRatio = 1.0f.coerceIn(minZoomRatio, maxZoomRatio)
 
             val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             setupImageReaders(map)
