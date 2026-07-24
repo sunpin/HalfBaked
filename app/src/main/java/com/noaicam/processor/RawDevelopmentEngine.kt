@@ -3,6 +3,7 @@ package com.noaicam.processor
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.*
+import android.media.ExifInterface
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -26,12 +27,12 @@ class RawDevelopmentEngine(private val context: Context) {
                 val file = File(filePath)
                 if (!file.exists()) return@withContext null
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                var decodedBitmap: Bitmap? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     val source = ImageDecoder.createSource(file)
                     ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
                         decoder.isMutableRequired = true
                         decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                        
+
                         val size = info.size
                         val maxSide = Math.max(size.width, size.height)
                         if (maxSide > maxDimension) {
@@ -59,6 +60,41 @@ class RawDevelopmentEngine(private val context: Context) {
                     }
                     BitmapFactory.decodeFile(filePath, decodeOptions)
                 }
+
+                // Check EXIF Orientation from DNG file and rotate bitmap physically to ensure Portrait orientation when shot upright
+                if (decodedBitmap != null) {
+                    try {
+                        val exif = ExifInterface(filePath)
+                        val orientation = exif.getAttributeInt(
+                            ExifInterface.TAG_ORIENTATION,
+                            ExifInterface.ORIENTATION_NORMAL
+                        )
+
+                        val rotationDegrees = when (orientation) {
+                            ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                            ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                            ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                            else -> 0
+                        }
+
+                        if (rotationDegrees != 0) {
+                            val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+                            val rotated = Bitmap.createBitmap(
+                                decodedBitmap, 0, 0,
+                                decodedBitmap.width, decodedBitmap.height,
+                                matrix, true
+                            )
+                            if (rotated != decodedBitmap) {
+                                decodedBitmap.recycle()
+                            }
+                            decodedBitmap = rotated
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error checking EXIF orientation on RAW file", e)
+                    }
+                }
+
+                decodedBitmap
             } catch (e: Exception) {
                 Log.e(TAG, "Error decoding RAW file", e)
                 null
@@ -200,9 +236,11 @@ class RawDevelopmentEngine(private val context: Context) {
                         contentValues
                     )
 
-                    imageUri?.let { uri ->
-                        resolver.openOutputStream(uri)?.use { out ->
-                            bitmap.compress(Bitmap.CompressFormat.JPEG, 98, out)
+                    if (imageUri != null) {
+                        resolver.openOutputStream(imageUri).use { out ->
+                            if (out != null) {
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, 96, out)
+                            }
                         }
                     }
                 } else {
@@ -211,13 +249,14 @@ class RawDevelopmentEngine(private val context: Context) {
                         "NOAICAM"
                     )
                     if (!dcimDir.exists()) dcimDir.mkdirs()
-
-                    val imageFile = File(dcimDir, filename)
-                    FileOutputStream(imageFile).use { out ->
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 98, out)
+                    val file = File(dcimDir, filename)
+                    FileOutputStream(file).use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 96, out)
                     }
-                    imageUri = Uri.fromFile(imageFile)
+                    imageUri = Uri.fromFile(file)
                 }
+
+                Log.d(TAG, "Developed photo successfully saved to gallery: $imageUri (Size: ${bitmap.width}x${bitmap.height})")
             } catch (e: Exception) {
                 Log.e(TAG, "Error saving developed photo to gallery", e)
             }

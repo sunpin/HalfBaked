@@ -10,6 +10,7 @@ import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.hardware.camera2.params.StreamConfigurationMap
+import android.media.ExifInterface
 import android.media.Image
 import android.media.ImageReader
 import android.os.Build
@@ -18,6 +19,7 @@ import android.os.HandlerThread
 import android.os.Looper
 import android.util.Log
 import android.util.Size
+import android.view.OrientationEventListener
 import android.view.Surface
 import com.noaicam.data.FlashMode
 import com.noaicam.data.RawImageData
@@ -58,6 +60,10 @@ class Camera2RawManager(private val context: Context) {
 
     private val cameraOpenCloseLock = Semaphore(1)
 
+    // Device Physical Orientation Tracking
+    private var orientationEventListener: OrientationEventListener? = null
+    private var deviceOrientationDegree: Int = 0
+
     var cameraId: String? = null
         private set
     var activeLensId: String = "WIDE"
@@ -95,6 +101,27 @@ class Camera2RawManager(private val context: Context) {
     var onCaptureProgress: ((Float, String) -> Unit)? = null
     var onFocusStatusChanged: ((FocusStatus) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+
+    init {
+        startOrientationListener()
+    }
+
+    private fun startOrientationListener() {
+        if (orientationEventListener == null) {
+            orientationEventListener = object : OrientationEventListener(context) {
+                override fun onOrientationChanged(orientation: Int) {
+                    if (orientation != ORIENTATION_UNKNOWN) {
+                        deviceOrientationDegree = orientation
+                    }
+                }
+            }
+        }
+        orientationEventListener?.enable()
+    }
+
+    private fun stopOrientationListener() {
+        orientationEventListener?.disable()
+    }
 
     private fun postProgress(progress: Float, text: String) {
         mainHandler.post { onCaptureProgress?.invoke(progress, text) }
@@ -166,6 +193,7 @@ class Camera2RawManager(private val context: Context) {
             backgroundThread = HandlerThread("CameraBackground").also { it.start() }
             backgroundHandler = Handler(backgroundThread!!.looper)
         }
+        startOrientationListener()
     }
 
     fun stopBackgroundThread() {
@@ -177,6 +205,7 @@ class Camera2RawManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping background thread", e)
         }
+        stopOrientationListener()
     }
 
     @SuppressLint("MissingPermission")
@@ -245,8 +274,6 @@ class Camera2RawManager(private val context: Context) {
             }
 
             val characteristics = cameraCharacteristics!!
-
-            Log.d("NOAICAM_DEBUG", "openCamera: targetLensId=$targetLensId, cameraId=$cameraId, targetPhysicalCameraId=$targetPhysicalCameraId")
 
             val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
             isRawSupported = capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW)
@@ -580,6 +607,25 @@ class Camera2RawManager(private val context: Context) {
             applyFlashControl(captureBuilder, isStillCapture = true)
             applyZoom(captureBuilder)
 
+            // Compute JPEG / DNG Orientation according to physical device rotation
+            val deviceRotated = (deviceOrientationDegree + 45) / 90 * 90
+            val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+            val facing = characteristics.get(CameraCharacteristics.LENS_FACING) ?: CameraCharacteristics.LENS_FACING_BACK
+
+            val jpegOrientation = if (facing == CameraCharacteristics.LENS_FACING_FRONT) {
+                (sensorOrientation - deviceRotated + 360) % 360
+            } else {
+                (sensorOrientation + deviceRotated) % 360
+            }
+
+            val exifOrientation = when (jpegOrientation) {
+                90 -> ExifInterface.ORIENTATION_ROTATE_90
+                180 -> ExifInterface.ORIENTATION_ROTATE_180
+                270 -> ExifInterface.ORIENTATION_ROTATE_270
+                else -> ExifInterface.ORIENTATION_NORMAL
+            }
+
+            captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
             captureBuilder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
             captureBuilder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
             captureBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
@@ -601,6 +647,8 @@ class Camera2RawManager(private val context: Context) {
                         postProgress(0.50f, "RAWデータDNGファイルへ保存中...")
 
                         val dngCreator = DngCreator(characteristics, res)
+                        dngCreator.setOrientation(exifOrientation)
+
                         FileOutputStream(dngFile).use { out ->
                             dngCreator.writeImage(out, img)
                         }
