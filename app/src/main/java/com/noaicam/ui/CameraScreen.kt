@@ -108,8 +108,8 @@ fun CameraScreen(
     var selectedShutterNanos by remember { mutableLongStateOf(settingsManager.manualShutterNanos) }
     var developParams by remember { mutableStateOf(settingsManager.getDevelopParams()) }
 
-    // Pinch-to-Zoom State (Preserved across library transitions)
-    var zoomRatio by remember { mutableFloatStateOf(1.0f) }
+    // Pinch-to-Zoom State (PERSISTED across library transitions & app navigation)
+    var zoomRatio by remember { mutableFloatStateOf(settingsManager.savedZoomRatio) }
 
     var showManualAeDrawer by remember { mutableStateOf(false) }
     var showSliders by remember { mutableStateOf(false) }
@@ -188,7 +188,8 @@ fun CameraScreen(
     fun switchCameraLens(lensId: String) {
         activeLensId = lensId
         settingsManager.selectedCameraId = lensId
-        zoomRatio = 1.0f // Reset zoom when switching cameras!
+        zoomRatio = 1.0f // Reset zoom when explicitly changing camera lens!
+        settingsManager.savedZoomRatio = 1.0f
 
         val tv = textureViewRef
         if (tv != null && tv.isAvailable) {
@@ -219,7 +220,7 @@ fun CameraScreen(
                         val surface = tv.surfaceTexture
                         if (surface != null) {
                             cameraManager.openCamera(surface, tv.width, tv.height, activeLensId)
-                            cameraManager.setZoomRatio(zoomRatio) // Restore previous zoom!
+                            cameraManager.setZoomRatio(zoomRatio) // Restore previous saved zoom!
                             cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                             cameraManager.setFlashMode(flashMode)
                             isRawHardwareSupported = cameraManager.isRawSupported
@@ -307,6 +308,7 @@ fun CameraScreen(
                     .pointerInput(Unit) {
                         detectTransformGestures { _, _, zoom, _ ->
                             zoomRatio = (zoomRatio * zoom).coerceIn(1.0f, cameraManager.maxZoomRatio)
+                            settingsManager.savedZoomRatio = zoomRatio
                             cameraManager.setZoomRatio(zoomRatio)
                         }
                     }

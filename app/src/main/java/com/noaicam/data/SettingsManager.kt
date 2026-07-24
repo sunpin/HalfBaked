@@ -23,6 +23,10 @@ class SettingsManager(context: Context) {
         get() = prefs.getString("selected_camera_id", null)
         set(value) = prefs.edit().putString("selected_camera_id", value).apply()
 
+    var savedZoomRatio: Float
+        get() = prefs.getFloat("saved_zoom_ratio", 1.0f)
+        set(value) = prefs.edit().putFloat("saved_zoom_ratio", value).apply()
+
     var captureResolution: CaptureResolution
         get() {
             val name = prefs.getString("capture_resolution", CaptureResolution.FULL.name)
