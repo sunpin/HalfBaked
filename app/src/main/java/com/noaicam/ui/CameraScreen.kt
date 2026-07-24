@@ -244,7 +244,7 @@ fun CameraScreen(
 
                 val baseBmp = rawEngine.decodeRawToBitmap(rawData.dngFilePath, maxDim)
                 if (baseBmp != null) {
-                    val developedBmp = rawEngine.processBitmap(baseBmp, developParams, 1.0f)
+                    val developedBmp = rawEngine.processBitmap(baseBmp, developParams, zoomRatio)
                     lastSavedThumbnail = developedBmp
                     rawEngine.saveDevelopedPhotoToGallery(developedBmp)
                 }
