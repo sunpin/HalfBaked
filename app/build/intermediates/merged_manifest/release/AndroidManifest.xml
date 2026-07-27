@@ -44,6 +44,7 @@
             android:name="com.noaicam.MainActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.NOAICAM" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

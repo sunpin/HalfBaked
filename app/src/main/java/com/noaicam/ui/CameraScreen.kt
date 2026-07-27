@@ -1,6 +1,5 @@
 package com.noaicam.ui
 
-import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
 import android.view.TextureView
@@ -33,7 +32,6 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -119,12 +117,6 @@ fun CameraScreen(
     // Tap-to-Focus Indicator State & Focus Status
     var focusTapOffset by remember { mutableStateOf<Offset?>(null) }
     var focusStatus by remember { mutableStateOf(FocusStatus.IDLE) }
-
-    // Orientation state
-    val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val aspectW = if (isLandscape) 4 else 3
-    val aspectH = if (isLandscape) 3 else 4
 
     // Real-time Viewfinder ColorMatrix Simulation based on Live Develop Parameters
     val liveColorMatrix = remember(developParams) {
@@ -283,26 +275,24 @@ fun CameraScreen(
         }
     }
 
-    // SINGLE STABLE BOX LAYOUT
+    // SINGLE FIXED PORTRAIT LAYOUT (NEVER ROTATES OR SHIFTS UI)
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(DarkBackground)
     ) {
-        // 1. VIEWFINDER CONTAINER (AUTOFIT ASPECT RATIO)
+        // 1. STABLE 3:4 PORTRAIT VIEWFINDER CONTAINER
         Box(
-            modifier = if (isLandscape) {
-                Modifier.fillMaxSize()
-            } else {
-                Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .padding(top = 90.dp, bottom = 145.dp)
-            },
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(top = 90.dp, bottom = 145.dp),
             contentAlignment = Alignment.Center
         ) {
             Box(
                 modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(3f / 4f)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color.Black)
                     .drawWithContent {
@@ -340,10 +330,10 @@ fun CameraScreen(
                     }
             ) {
                 AndroidView(
+                    modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->
-                        AutoFitTextureView(ctx).apply {
+                        TextureView(ctx).apply {
                             textureViewRef = this
-                            setAspectRatio(aspectW, aspectH)
                             surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                                 override fun onSurfaceTextureAvailable(
                                     surface: SurfaceTexture,
@@ -361,9 +351,7 @@ fun CameraScreen(
                                     surface: SurfaceTexture,
                                     width: Int,
                                     height: Int
-                                ) {
-                                    cameraManager.openCamera(surface, width, height, activeLensId)
-                                }
+                                ) {}
 
                                 override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
                                     cameraManager.closeCamera()
@@ -385,9 +373,6 @@ fun CameraScreen(
                                 }
                             }
                         }
-                    },
-                    update = { view ->
-                        view.setAspectRatio(aspectW, aspectH)
                     }
                 )
 
