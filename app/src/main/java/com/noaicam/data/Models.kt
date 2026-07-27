@@ -16,6 +16,7 @@ data class RawImageData(
 )
 
 data class DevelopParams(
+    val isWbAuto: Boolean = true,      // ホワイトバランス AUTOモード
     val exposure: Float = 0f,          // -3.0f to +3.0f EV
     val temperature: Float = 5500f,    // 2000K to 10000K
     val tint: Float = 0f,              // -100f to +100f

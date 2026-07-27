@@ -57,6 +57,10 @@ class SettingsManager(context: Context) {
         get() = prefs.getInt("last_gallery_tab", 1) // Default to 1 (JPG tab)
         set(value) = prefs.edit().putInt("last_gallery_tab", value).apply()
 
+    var isWbAuto: Boolean
+        get() = prefs.getBoolean("develop_wb_auto", true)
+        set(value) = prefs.edit().putBoolean("develop_wb_auto", value).apply()
+
     var exposure: Float
         get() = prefs.getFloat("develop_exposure", 0f)
         set(value) = prefs.edit().putFloat("develop_exposure", value).apply()
@@ -102,6 +106,7 @@ class SettingsManager(context: Context) {
 
     fun getDevelopParams(): DevelopParams {
         return DevelopParams(
+            isWbAuto = isWbAuto,
             exposure = exposure,
             temperature = temperature,
             tint = tint,
@@ -115,6 +120,7 @@ class SettingsManager(context: Context) {
     }
 
     fun saveDevelopParams(params: DevelopParams) {
+        isWbAuto = params.isWbAuto
         exposure = params.exposure
         temperature = params.temperature
         tint = params.tint

@@ -123,7 +123,7 @@ fun CameraScreen(
         val matrix = ColorMatrix()
 
         val expMult = 2.0f.pow(developParams.exposure)
-        val tempFactor = (developParams.temperature - 5500f) / 4500f
+        val tempFactor = if (developParams.isWbAuto) 0f else (developParams.temperature - 5500f) / 4500f
         val redGain = (1.0f + tempFactor * 0.3f) * expMult
         val blueGain = (1.0f - tempFactor * 0.3f) * expMult
         val greenGain = (1.0f + (developParams.tint / 100f) * 0.2f) * expMult
@@ -281,12 +281,9 @@ fun CameraScreen(
             .fillMaxSize()
             .background(DarkBackground)
     ) {
-        // 1. DYNAMIC LETTERBOX/PILLARBOX VIEWFINDER (Positioned strictly below top header)
+        // 1. DYNAMIC LETTERBOX/PILLARBOX VIEWFINDER (MAXIMIZED LANDSCAPE VIEWPORT ALLOWING OVERLAY BUTTONS)
         BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .padding(top = 90.dp, bottom = 145.dp),
+            modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             val containerW = maxWidth
@@ -299,15 +296,15 @@ fun CameraScreen(
             val targetAspectRatio = if (isLandscape) sensorRatio else (1f / sensorRatio)
             val containerAspect = if (containerH.value > 0f) containerW.value / containerH.value else 1.0f
 
-            val (boxW, boxH) = if (containerAspect > targetAspectRatio) {
-                // Container is wider than target aspect ratio -> pillarbox (black bars on left & right)
+            val (boxW, boxH) = if (isLandscape) {
+                // In landscape mode: maximize height and allow buttons/UI to overlay transparently
                 val h = containerH
-                val w = h * targetAspectRatio
+                val w = (h * targetAspectRatio).coerceAtMost(containerW)
                 Pair(w, h)
             } else {
-                // Container is taller than target aspect ratio -> letterbox (black bars on top & bottom)
+                // In portrait mode: fit within screen bounds
                 val w = containerW
-                val h = w / targetAspectRatio
+                val h = (w / targetAspectRatio).coerceAtMost(containerH)
                 Pair(w, h)
             }
 
@@ -799,7 +796,7 @@ fun CameraScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 260.dp)
+                        .heightIn(max = 280.dp)
                         .padding(14.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
@@ -818,7 +815,7 @@ fun CameraScreen(
                             developParams = DevelopParams()
                             settingsManager.saveDevelopParams(developParams)
                         }) {
-                            Text("リセット", fontSize = 11.sp, color = TextSecondary)
+                            Text("全パラメータリセット", fontSize = 11.sp, color = TextSecondary)
                         }
                     }
 
@@ -886,7 +883,7 @@ fun CameraScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Sliders
+                    // Sliders with Individual Parameter Resets & WB Auto Mode
                     SliderControl(
                         label = "露出補正 (EV)",
                         valueDisplay = "%.2f EV".format(developParams.exposure),
@@ -895,20 +892,76 @@ fun CameraScreen(
                         onValueChange = {
                             developParams = developParams.copy(exposure = it)
                             settingsManager.saveDevelopParams(developParams)
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    SliderControl(
-                        label = "色温度 (WB)",
-                        valueDisplay = "${developParams.temperature.toInt()}K",
-                        value = developParams.temperature,
-                        valueRange = 2000f..10000f,
-                        onValueChange = {
-                            developParams = developParams.copy(temperature = it)
+                        },
+                        onReset = {
+                            developParams = developParams.copy(exposure = 0f)
                             settingsManager.saveDevelopParams(developParams)
                         }
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // White Balance Section (Auto / Manual Kelvin)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "ホワイトバランス (WB)", fontSize = 12.sp, color = TextPrimary)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(
+                                color = if (developParams.isWbAuto) RawGold else DarkSurfaceVariant,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    developParams = developParams.copy(isWbAuto = true)
+                                    settingsManager.saveDevelopParams(developParams)
+                                }
+                            ) {
+                                Text(
+                                    text = "AUTO",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (developParams.isWbAuto) Color.Black else TextPrimary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                            Surface(
+                                color = if (!developParams.isWbAuto) RawGold else DarkSurfaceVariant,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    developParams = developParams.copy(isWbAuto = false)
+                                    settingsManager.saveDevelopParams(developParams)
+                                }
+                            ) {
+                                Text(
+                                    text = "マニュアル",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (!developParams.isWbAuto) Color.Black else TextPrimary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    if (!developParams.isWbAuto) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        SliderControl(
+                            label = "色温度 (WB)",
+                            valueDisplay = "${developParams.temperature.toInt()}K",
+                            value = developParams.temperature,
+                            valueRange = 2000f..10000f,
+                            onValueChange = {
+                                developParams = developParams.copy(isWbAuto = false, temperature = it)
+                                settingsManager.saveDevelopParams(developParams)
+                            },
+                            onReset = {
+                                developParams = developParams.copy(temperature = 5500f)
+                                settingsManager.saveDevelopParams(developParams)
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
                     SliderControl(
                         label = "コントラスト",
                         valueDisplay = "%.2fx".format(developParams.contrast),
@@ -917,9 +970,13 @@ fun CameraScreen(
                         onValueChange = {
                             developParams = developParams.copy(contrast = it)
                             settingsManager.saveDevelopParams(developParams)
+                        },
+                        onReset = {
+                            developParams = developParams.copy(contrast = 1.0f)
+                            settingsManager.saveDevelopParams(developParams)
                         }
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     SliderControl(
                         label = "黒レベル (Black Point)",
                         valueDisplay = "%.2f".format(developParams.blackLevel),
@@ -928,9 +985,13 @@ fun CameraScreen(
                         onValueChange = {
                             developParams = developParams.copy(blackLevel = it)
                             settingsManager.saveDevelopParams(developParams)
+                        },
+                        onReset = {
+                            developParams = developParams.copy(blackLevel = 0f)
+                            settingsManager.saveDevelopParams(developParams)
                         }
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     SliderControl(
                         label = "白レベル (White Point)",
                         valueDisplay = "%.2f".format(developParams.whiteLevel),
@@ -939,9 +1000,13 @@ fun CameraScreen(
                         onValueChange = {
                             developParams = developParams.copy(whiteLevel = it)
                             settingsManager.saveDevelopParams(developParams)
+                        },
+                        onReset = {
+                            developParams = developParams.copy(whiteLevel = 0f)
+                            settingsManager.saveDevelopParams(developParams)
                         }
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     SliderControl(
                         label = "シャープネス (Sharpness)",
                         valueDisplay = "%.2fx".format(developParams.sharpness),
@@ -950,9 +1015,13 @@ fun CameraScreen(
                         onValueChange = {
                             developParams = developParams.copy(sharpness = it)
                             settingsManager.saveDevelopParams(developParams)
+                        },
+                        onReset = {
+                            developParams = developParams.copy(sharpness = 1.0f)
+                            settingsManager.saveDevelopParams(developParams)
                         }
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     SliderControl(
                         label = "彩度 (Saturation)",
                         valueDisplay = "%.2fx".format(developParams.saturation),
@@ -960,6 +1029,10 @@ fun CameraScreen(
                         valueRange = 0.0f..2.0f,
                         onValueChange = {
                             developParams = developParams.copy(saturation = it)
+                            settingsManager.saveDevelopParams(developParams)
+                        },
+                        onReset = {
+                            developParams = developParams.copy(saturation = 1.0f)
                             settingsManager.saveDevelopParams(developParams)
                         }
                     )
@@ -1127,14 +1200,35 @@ fun SliderControl(
     valueDisplay: String,
     value: Float,
     valueRange: ClosedFloatingPointRange<Float>,
-    onValueChange: (Float) -> Unit
+    onValueChange: (Float) -> Unit,
+    onReset: (() -> Unit)? = null
 ) {
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = label, fontSize = 12.sp, color = TextPrimary)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(text = label, fontSize = 12.sp, color = TextPrimary)
+                onReset?.let {
+                    Surface(
+                        color = DarkSurfaceVariant,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.clickable(onClick = it)
+                    ) {
+                        Text(
+                            text = "リセット",
+                            fontSize = 9.sp,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
             Text(text = valueDisplay, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RawGold)
         }
         Slider(

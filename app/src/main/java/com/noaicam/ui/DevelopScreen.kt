@@ -251,9 +251,9 @@ fun DevelopScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        DevelopPresetChip("リセット") { params = DevelopParams() }
+                        DevelopPresetChip("全リセット") { params = DevelopParams() }
                         DevelopPresetChip("ナチュラル") { params = DevelopParams(contrast = 1.1f, saturation = 1.05f) }
-                        DevelopPresetChip("フィルム") { params = DevelopParams(temperature = 6500f, contrast = 1.15f, saturation = 1.1f) }
+                        DevelopPresetChip("フィルム") { params = DevelopParams(isWbAuto = false, temperature = 6500f, contrast = 1.15f, saturation = 1.1f) }
                     }
                 }
 
@@ -301,17 +301,64 @@ fun DevelopScreen(
                                     valueDisplay = "%.2f EV".format(params.exposure),
                                     value = params.exposure,
                                     valueRange = -3.0f..3.0f,
-                                    onValueChange = { params = params.copy(exposure = it) }
+                                    onValueChange = { params = params.copy(exposure = it) },
+                                    onReset = { params = params.copy(exposure = 0f) }
                                 )
                                 Spacer(modifier = Modifier.height(12.dp))
 
-                                DevelopSliderControl(
-                                    label = "色温度 (WB)",
-                                    valueDisplay = "${params.temperature.toInt()}K",
-                                    value = params.temperature,
-                                    valueRange = 2000f..10000f,
-                                    onValueChange = { params = params.copy(temperature = it) }
-                                )
+                                // WB Mode & Temperature Control
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(text = "ホワイトバランス", fontSize = 12.sp, color = TextPrimary)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Surface(
+                                            color = if (params.isWbAuto) RawGold else DarkSurfaceVariant,
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.clickable {
+                                                params = params.copy(isWbAuto = true)
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "AUTO",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (params.isWbAuto) Color.Black else TextPrimary,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                        Surface(
+                                            color = if (!params.isWbAuto) RawGold else DarkSurfaceVariant,
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.clickable {
+                                                params = params.copy(isWbAuto = false)
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "マニュアル",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (!params.isWbAuto) Color.Black else TextPrimary,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (!params.isWbAuto) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    DevelopSliderControl(
+                                        label = "色温度 (WB)",
+                                        valueDisplay = "${params.temperature.toInt()}K",
+                                        value = params.temperature,
+                                        valueRange = 2000f..10000f,
+                                        onValueChange = { params = params.copy(isWbAuto = false, temperature = it) },
+                                        onReset = { params = params.copy(temperature = 5500f) }
+                                    )
+                                }
+
                                 Spacer(modifier = Modifier.height(12.dp))
 
                                 DevelopSliderControl(
@@ -319,7 +366,8 @@ fun DevelopScreen(
                                     valueDisplay = "${params.tint.toInt()}",
                                     value = params.tint,
                                     valueRange = -100f..100f,
-                                    onValueChange = { params = params.copy(tint = it) }
+                                    onValueChange = { params = params.copy(tint = it) },
+                                    onReset = { params = params.copy(tint = 0f) }
                                 )
                             }
                             1 -> {
@@ -328,7 +376,35 @@ fun DevelopScreen(
                                     valueDisplay = "%.2fx".format(params.contrast),
                                     value = params.contrast,
                                     valueRange = 0.5f..2.0f,
-                                    onValueChange = { params = params.copy(contrast = it) }
+                                    onValueChange = { params = params.copy(contrast = it) },
+                                    onReset = { params = params.copy(contrast = 1.0f) }
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                DevelopSliderControl(
+                                    label = "黒レベル (Black Point)",
+                                    valueDisplay = "%.2f".format(params.blackLevel),
+                                    value = params.blackLevel,
+                                    valueRange = -1.0f..1.0f,
+                                    onValueChange = { params = params.copy(blackLevel = it) },
+                                    onReset = { params = params.copy(blackLevel = 0f) }
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                DevelopSliderControl(
+                                    label = "白レベル (White Point)",
+                                    valueDisplay = "%.2f".format(params.whiteLevel),
+                                    value = params.whiteLevel,
+                                    valueRange = -1.0f..1.0f,
+                                    onValueChange = { params = params.copy(whiteLevel = it) },
+                                    onReset = { params = params.copy(whiteLevel = 0f) }
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                DevelopSliderControl(
+                                    label = "シャープネス (Sharpness)",
+                                    valueDisplay = "%.2fx".format(params.sharpness),
+                                    value = params.sharpness,
+                                    valueRange = 0.0f..2.0f,
+                                    onValueChange = { params = params.copy(sharpness = it) },
+                                    onReset = { params = params.copy(sharpness = 1.0f) }
                                 )
                             }
                             2 -> {
@@ -337,7 +413,8 @@ fun DevelopScreen(
                                     valueDisplay = "%.2fx".format(params.saturation),
                                     value = params.saturation,
                                     valueRange = 0.0f..2.0f,
-                                    onValueChange = { params = params.copy(saturation = it) }
+                                    onValueChange = { params = params.copy(saturation = it) },
+                                    onReset = { params = params.copy(saturation = 1.0f) }
                                 )
                             }
                         }
@@ -406,14 +483,35 @@ fun DevelopSliderControl(
     valueDisplay: String,
     value: Float,
     valueRange: ClosedFloatingPointRange<Float>,
-    onValueChange: (Float) -> Unit
+    onValueChange: (Float) -> Unit,
+    onReset: (() -> Unit)? = null
 ) {
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = label, fontSize = 12.sp, color = TextPrimary)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(text = label, fontSize = 12.sp, color = TextPrimary)
+                onReset?.let {
+                    Surface(
+                        color = DarkSurfaceVariant,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.clickable(onClick = it)
+                    ) {
+                        Text(
+                            text = "リセット",
+                            fontSize = 9.sp,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
             Text(text = valueDisplay, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RawGold)
         }
         Slider(

@@ -142,7 +142,7 @@ class RawDevelopmentEngine(private val context: Context) {
             val expMult = 2.0f.pow(params.exposure)
 
             // 3. White Balance / Temperature & Tint
-            val tempFactor = (params.temperature - 5500f) / 4500f
+            val tempFactor = if (params.isWbAuto) 0f else (params.temperature - 5500f) / 4500f
             val redGain = (1.0f + tempFactor * 0.3f) * expMult
             val blueGain = (1.0f - tempFactor * 0.3f) * expMult
             val greenGain = (1.0f + (params.tint / 100f) * 0.2f) * expMult
