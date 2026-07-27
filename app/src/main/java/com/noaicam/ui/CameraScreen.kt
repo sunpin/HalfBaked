@@ -5,6 +5,7 @@ import android.graphics.SurfaceTexture
 import android.view.TextureView
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,6 +51,7 @@ import com.noaicam.data.FlashMode
 import com.noaicam.data.RawImageData
 import com.noaicam.data.SettingsManager
 import com.noaicam.data.ZoomCropMode
+import com.noaicam.processor.FocusPeakingEngine
 import com.noaicam.processor.RawDevelopmentEngine
 import com.noaicam.ui.theme.*
 import kotlinx.coroutines.delay
@@ -82,6 +84,7 @@ fun CameraScreen(
     val coroutineScope = rememberCoroutineScope()
     val cameraManager = remember { Camera2RawManager(context) }
     val rawEngine = remember { RawDevelopmentEngine(context) }
+    val peakingEngine = remember { FocusPeakingEngine() }
     val settingsManager = remember { SettingsManager(context) }
 
     var textureViewRef by remember { mutableStateOf<TextureView?>(null) }
@@ -92,6 +95,7 @@ fun CameraScreen(
 
     var currentIso by remember { mutableIntStateOf(100) }
     var currentShutter by remember { mutableStateOf("1/50s") }
+    var currentFocusDistance by remember { mutableStateOf("∞") }
     var isRawHardwareSupported by remember { mutableStateOf(true) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
@@ -101,6 +105,9 @@ fun CameraScreen(
 
     // PERSISTENT USER SETTINGS
     var showGrid by remember { mutableStateOf(settingsManager.showGrid) }
+    var showFocusPeaking by remember { mutableStateOf(false) }
+    var peakingEdgeOffsets by remember { mutableStateOf<List<Offset>>(emptyList()) }
+
     var flashMode by remember { mutableStateOf(settingsManager.flashMode) }
     var captureResolution by remember { mutableStateOf(settingsManager.captureResolution) }
     var isManualAe by remember { mutableStateOf(settingsManager.isManualAe) }
@@ -117,6 +124,26 @@ fun CameraScreen(
     // Tap-to-Focus Indicator State & Focus Status
     var focusTapOffset by remember { mutableStateOf<Offset?>(null) }
     var focusStatus by remember { mutableStateOf(FocusStatus.IDLE) }
+
+    // Focus Peaking Loop
+    LaunchedEffect(showFocusPeaking) {
+        if (showFocusPeaking) {
+            while (showFocusPeaking) {
+                val tv = textureViewRef
+                if (tv != null && tv.isAvailable) {
+                    val bmp = tv.getBitmap(160, 213)
+                    if (bmp != null) {
+                        val edges = peakingEngine.detectInFocusEdgeOffsets(bmp, threshold = 35)
+                        peakingEdgeOffsets = edges
+                        bmp.recycle()
+                    }
+                }
+                delay(60)
+            }
+        } else {
+            peakingEdgeOffsets = emptyList()
+        }
+    }
 
     // Real-time Viewfinder ColorMatrix Simulation based on Live Develop Parameters
     val liveColorMatrix = remember(developParams) {
@@ -262,6 +289,10 @@ fun CameraScreen(
 
         cameraManager.onFocusStatusChanged = { status ->
             focusStatus = status
+        }
+
+        cameraManager.onFocusDistanceChanged = { distText ->
+            currentFocusDistance = distText
         }
 
         cameraManager.onError = { error ->
@@ -414,6 +445,22 @@ fun CameraScreen(
                     }
                 }
 
+                // Focus Peaking Neon Green Overlay Highlights
+                if (showFocusPeaking && peakingEdgeOffsets.isNotEmpty()) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val w = size.width
+                        val h = size.height
+                        val neonGreen = Color(0xFF00FF66)
+                        for (offset in peakingEdgeOffsets) {
+                            drawCircle(
+                                color = neonGreen,
+                                radius = 2.5f,
+                                center = Offset(offset.x * w, offset.y * h)
+                            )
+                        }
+                    }
+                }
+
                 // Zoom Ratio Floating Badge
                 if (zoomRatio > 1.05f) {
                     Surface(
@@ -505,7 +552,7 @@ fun CameraScreen(
             }
         }
 
-        // 3. TOP HEADER ROW (FLASH MODE SELECTOR + IDLE SENSOR INFO PILL + ACTION BUTTONS)
+        // 3. TOP HEADER ROW (FLASH MODE SELECTOR + IDLE SENSOR INFO PILL WITH FOCUS DISTANCE + ACTION BUTTONS)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -547,7 +594,7 @@ fun CameraScreen(
                     )
                 }
 
-                // PERSISTENT IDLE SENSOR INFO PILL (CENTERED OUTSIDE / ABOVE PREVIEW IMAGE)
+                // PERSISTENT IDLE SENSOR INFO PILL WITH LIVE FOCUS DISTANCE
                 Surface(
                     modifier = Modifier
                         .clickable {
@@ -560,7 +607,7 @@ fun CameraScreen(
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
@@ -590,6 +637,14 @@ fun CameraScreen(
                             color = TextPrimary
                         )
 
+                        // LIVE FOCUS DISTANCE READOUT
+                        Text(
+                            text = "AF:$currentFocusDistance",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = RawGold
+                        )
+
                         val evFormatted = if (developParams.exposure >= 0f) "+%.1fEV".format(developParams.exposure) else "%.1fEV".format(developParams.exposure)
                         Text(
                             text = evFormatted,
@@ -600,11 +655,28 @@ fun CameraScreen(
                     }
                 }
 
-                // Controls Right (Sliders Drawer Toggle, Grid)
+                // Controls Right (Focus Peaking Toggle, Sliders Drawer Toggle, Grid)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // FOCUS PEAKING TOGGLE BUTTON
+                    IconButton(
+                        onClick = {
+                            showFocusPeaking = !showFocusPeaking
+                        },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(if (showFocusPeaking) Color(0xFF00FF66) else DarkSurface.copy(alpha = 0.8f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CenterFocusWeak,
+                            contentDescription = "Focus Peaking",
+                            tint = if (showFocusPeaking) Color.Black else TextPrimary
+                        )
+                    }
+
                     IconButton(
                         onClick = {
                             showManualAeDrawer = false

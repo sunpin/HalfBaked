@@ -76,6 +76,8 @@ class Camera2RawManager(private val context: Context) {
         private set
     var currentShutterNanos: Long = 10000000L
         private set
+    var currentFocusDistanceText: String = "∞"
+        private set
     var sensorAspectRatio: Float = 4f / 3f
         private set
 
@@ -103,6 +105,7 @@ class Camera2RawManager(private val context: Context) {
     var onRawCaptured: ((RawImageData) -> Unit)? = null
     var onCaptureProgress: ((Float, String) -> Unit)? = null
     var onFocusStatusChanged: ((FocusStatus) -> Unit)? = null
+    var onFocusDistanceChanged: ((String) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
 
     init {
@@ -136,6 +139,10 @@ class Camera2RawManager(private val context: Context) {
 
     private fun postFocusStatus(status: FocusStatus) {
         mainHandler.post { onFocusStatusChanged?.invoke(status) }
+    }
+
+    private fun postFocusDistance(distanceText: String) {
+        mainHandler.post { onFocusDistanceChanged?.invoke(distanceText) }
     }
 
     private fun postError(error: String) {
@@ -522,6 +529,25 @@ class Camera2RawManager(private val context: Context) {
                         super.onCaptureCompleted(session, request, result)
                         currentIso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: manualIso
                         currentShutterNanos = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: manualShutterNanos
+
+                        // Extract Live Focus Distance in Meters/CM
+                        val distDiopters = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                        if (distDiopters != null) {
+                            val text = if (distDiopters <= 0.05f) {
+                                "∞"
+                            } else {
+                                val meters = 1.0f / distDiopters
+                                if (meters >= 1.0f) {
+                                    "%.1fm".format(meters)
+                                } else {
+                                    "${(meters * 100).toInt()}cm"
+                                }
+                            }
+                            if (text != currentFocusDistanceText) {
+                                currentFocusDistanceText = text
+                                postFocusDistance(text)
+                            }
+                        }
 
                         val afState = result.get(CaptureResult.CONTROL_AF_STATE)
                         if (afState != null) {
