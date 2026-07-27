@@ -507,6 +507,12 @@ class Camera2RawManager(private val context: Context) {
         updatePreviewSession()
     }
 
+    fun resetFocusToAuto() {
+        activeMeteringRegion = null
+        updatePreviewSession()
+        postFocusStatus(FocusStatus.IDLE)
+    }
+
     private fun updatePreviewSession() {
         val device = cameraDevice ?: return
         val session = captureSession ?: return

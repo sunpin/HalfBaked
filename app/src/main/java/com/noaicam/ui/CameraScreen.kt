@@ -121,7 +121,7 @@ fun CameraScreen(
     var showManualAeDrawer by remember { mutableStateOf(false) }
     var showSliders by remember { mutableStateOf(false) }
 
-    // Tap-to-Focus Indicator State & Focus Status
+    // Tap-to-Focus Indicator State & Focus Status (STAYS VISIBLE ON SCREEN!)
     var focusTapOffset by remember { mutableStateOf<Offset?>(null) }
     var focusStatus by remember { mutableStateOf(FocusStatus.IDLE) }
 
@@ -480,16 +480,8 @@ fun CameraScreen(
                     }
                 }
 
-                // Tap-to-Focus Ring Overlay
+                // Persistent Tap-to-Focus Ring Overlay (STAYS VISIBLE UNTIL TAPPED AGAIN TO RESET)
                 focusTapOffset?.let { offset ->
-                    LaunchedEffect(focusStatus) {
-                        if (focusStatus == FocusStatus.LOCKED || focusStatus == FocusStatus.FAILED) {
-                            delay(1800)
-                            focusTapOffset = null
-                            focusStatus = FocusStatus.IDLE
-                        }
-                    }
-
                     val ringColor = when (focusStatus) {
                         FocusStatus.SEARCHING -> RawGold
                         FocusStatus.LOCKED -> RawBypassGreen
@@ -505,17 +497,20 @@ fun CameraScreen(
                                 width = if (focusStatus == FocusStatus.LOCKED) 3.dp else 2.dp,
                                 color = ringColor,
                                 shape = CircleShape
-                            ),
+                            )
+                            .clickable {
+                                // Tap on ring to unlock AF and return to continuous auto focus
+                                focusTapOffset = null
+                                cameraManager.resetFocusToAuto()
+                            },
                         contentAlignment = Alignment.Center
                     ) {
-                        if (focusStatus == FocusStatus.LOCKED) {
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .clip(CircleShape)
-                                    .background(RawBypassGreen)
-                            )
-                        }
+                        Box(
+                            modifier = Modifier
+                                .size(12.dp)
+                                .clip(CircleShape)
+                                .background(ringColor)
+                        )
                     }
                 }
             }
@@ -598,8 +593,14 @@ fun CameraScreen(
                 Surface(
                     modifier = Modifier
                         .clickable {
-                            showSliders = false
-                            showManualAeDrawer = !showManualAeDrawer
+                            if (focusTapOffset != null) {
+                                // Tap pill when AF is locked to reset AF to Continuous Auto
+                                focusTapOffset = null
+                                cameraManager.resetFocusToAuto()
+                            } else {
+                                showSliders = false
+                                showManualAeDrawer = !showManualAeDrawer
+                            }
                         },
                     color = DarkSurface.copy(alpha = 0.90f),
                     shape = RoundedCornerShape(20.dp),
@@ -642,7 +643,7 @@ fun CameraScreen(
                             text = "AF:$currentFocusDistance",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = RawGold
+                            color = if (focusTapOffset != null) RawBypassGreen else RawGold
                         )
 
                         val evFormatted = if (developParams.exposure >= 0f) "+%.1fEV".format(developParams.exposure) else "%.1fEV".format(developParams.exposure)
