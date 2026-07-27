@@ -84,6 +84,9 @@ class Camera2RawManager(private val context: Context) {
     var previewSize: Size = Size(1920, 1440)
         private set
 
+    // Active Tap-to-Focus Metering Region
+    private var activeMeteringRegion: Array<MeteringRectangle>? = null
+
     // Zoom state
     var maxZoomRatio: Float = 8.0f
         private set
@@ -235,6 +238,7 @@ class Camera2RawManager(private val context: Context) {
             cleanResourcesWithoutLock()
             activeLensId = targetLensId
             targetPhysicalCameraId = null
+            activeMeteringRegion = null
 
             val wantFront = (targetLensId == "FRONT")
             val desiredFacing = if (wantFront) CameraCharacteristics.LENS_FACING_FRONT else CameraCharacteristics.LENS_FACING_BACK
@@ -514,7 +518,15 @@ class Camera2RawManager(private val context: Context) {
             applyExposureControl(builder)
             applyFlashControl(builder, isStillCapture = false)
             applyZoom(builder)
-            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+
+            if (activeMeteringRegion != null) {
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                builder.set(CaptureRequest.CONTROL_AF_REGIONS, activeMeteringRegion)
+                builder.set(CaptureRequest.CONTROL_AE_REGIONS, activeMeteringRegion)
+            } else {
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            }
+
             builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
             builder.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
 
@@ -580,19 +592,35 @@ class Camera2RawManager(private val context: Context) {
             postFocusStatus(FocusStatus.SEARCHING)
 
             val sensorRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
-                ?: Rect(0, 0, viewWidth, viewHeight)
+                ?: Rect(0, 0, 4000, 3000)
 
-            val areaSize = 220
-            val centerX = (xNorm * sensorRect.width()).toInt()
-            val centerY = (yNorm * sensorRect.height()).toInt()
+            val facing = characteristics.get(CameraCharacteristics.LENS_FACING) ?: CameraCharacteristics.LENS_FACING_BACK
+            val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
 
-            val left = Math.max(centerX - areaSize / 2, sensorRect.left)
-            val top = Math.max(centerY - areaSize / 2, sensorRect.top)
-            val right = Math.min(centerX + areaSize / 2, sensorRect.right)
-            val bottom = Math.min(centerY + areaSize / 2, sensorRect.bottom)
+            // 90° Sensor Coordinate System Transformation (UI 3:4 Portrait -> Sensor Rect)
+            val (sensorCenterX, sensorCenterY) = if (sensorOrientation == 90) {
+                val sX = (yNorm * sensorRect.width()).toInt()
+                val sY = ((1.0f - xNorm) * sensorRect.height()).toInt()
+                Pair(sX, sY)
+            } else if (sensorOrientation == 270) {
+                val sX = ((1.0f - yNorm) * sensorRect.width()).toInt()
+                val sY = (xNorm * sensorRect.height()).toInt()
+                Pair(sX, sY)
+            } else {
+                val sX = (xNorm * sensorRect.width()).toInt()
+                val sY = (yNorm * sensorRect.height()).toInt()
+                Pair(sX, sY)
+            }
+
+            val areaSize = 300
+            val left = (sensorCenterX - areaSize / 2).coerceIn(sensorRect.left, sensorRect.right - 2)
+            val top = (sensorCenterY - areaSize / 2).coerceIn(sensorRect.top, sensorRect.bottom - 2)
+            val right = (sensorCenterX + areaSize / 2).coerceIn(left + 1, sensorRect.right)
+            val bottom = (sensorCenterY + areaSize / 2).coerceIn(top + 1, sensorRect.bottom)
 
             val focusRect = Rect(left, top, right, bottom)
-            val meteringRect = MeteringRectangle(focusRect, 1000)
+            val meteringRect = MeteringRectangle(focusRect, MeteringRectangle.METERING_WEIGHT_MAX)
+            activeMeteringRegion = arrayOf(meteringRect)
 
             val focusBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
             focusBuilder.addTarget(surface)
@@ -601,8 +629,10 @@ class Camera2RawManager(private val context: Context) {
             applyZoom(focusBuilder)
 
             focusBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
-            focusBuilder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(meteringRect))
+            focusBuilder.set(CaptureRequest.CONTROL_AF_REGIONS, activeMeteringRegion)
+            focusBuilder.set(CaptureRequest.CONTROL_AE_REGIONS, activeMeteringRegion)
             focusBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START)
+            focusBuilder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER, CameraMetadata.CONTROL_AE_PRECAPTURE_TRIGGER_START)
 
             session.capture(focusBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(
@@ -622,9 +652,8 @@ class Camera2RawManager(private val context: Context) {
                         postFocusStatus(FocusStatus.LOCKED)
                     }
 
-                    mainHandler.postDelayed({
-                        updatePreviewSession()
-                    }, 1500)
+                    // Keep repeating request locked on tapped region!
+                    updatePreviewSession()
                 }
             }, backgroundHandler)
 
@@ -646,6 +675,13 @@ class Camera2RawManager(private val context: Context) {
             applyExposureControl(captureBuilder)
             applyFlashControl(captureBuilder, isStillCapture = true)
             applyZoom(captureBuilder)
+
+            // Preserve active tap-to-focus metering region for still photo capture!
+            if (activeMeteringRegion != null) {
+                captureBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                captureBuilder.set(CaptureRequest.CONTROL_AF_REGIONS, activeMeteringRegion)
+                captureBuilder.set(CaptureRequest.CONTROL_AE_REGIONS, activeMeteringRegion)
+            }
 
             // Compute JPEG / DNG Orientation according to physical device rotation
             val deviceRotated = (deviceOrientationDegree + 45) / 90 * 90
