@@ -281,18 +281,39 @@ fun CameraScreen(
             .fillMaxSize()
             .background(DarkBackground)
     ) {
-        // 1. FIXED & UNMOVING VIEWFINDER (Positioned strictly below top header)
-        Box(
+        // 1. DYNAMIC LETTERBOX/PILLARBOX VIEWFINDER (Positioned strictly below top header)
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
                 .padding(top = 90.dp, bottom = 145.dp),
             contentAlignment = Alignment.Center
         ) {
+            val containerW = maxWidth
+            val containerH = maxHeight
+
+            val isLandscape = containerW > containerH
+            val sensorRatio = if (cameraManager.sensorAspectRatio > 0f) cameraManager.sensorAspectRatio else (4f / 3f)
+
+            // Target aspect ratio (width / height)
+            val targetAspectRatio = if (isLandscape) sensorRatio else (1f / sensorRatio)
+            val containerAspect = if (containerH.value > 0f) containerW.value / containerH.value else 1.0f
+
+            val (boxW, boxH) = if (containerAspect > targetAspectRatio) {
+                // Container is wider than target aspect ratio -> pillarbox (black bars on left & right)
+                val h = containerH
+                val w = h * targetAspectRatio
+                Pair(w, h)
+            } else {
+                // Container is taller than target aspect ratio -> letterbox (black bars on top & bottom)
+                val w = containerW
+                val h = w / targetAspectRatio
+                Pair(w, h)
+            }
+
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(3f / 4f)
+                    .size(boxW, boxH)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color.Black)
                     .drawWithContent {
@@ -384,15 +405,15 @@ fun CameraScreen(
                                 .fillMaxHeight()
                                 .width(1.dp)
                                 .align(Alignment.CenterStart)
-                                .offset(x = 110.dp)
+                                .offset(x = (boxW.value * 0.33f).dp)
                                 .background(Color.White.copy(alpha = 0.25f))
                         )
                         Box(
                             modifier = Modifier
                                 .fillMaxHeight()
                                 .width(1.dp)
-                                .align(Alignment.CenterEnd)
-                                .offset(x = (-110).dp)
+                                .align(Alignment.CenterStart)
+                                .offset(x = (boxW.value * 0.66f).dp)
                                 .background(Color.White.copy(alpha = 0.25f))
                         )
                         Box(
@@ -400,15 +421,15 @@ fun CameraScreen(
                                 .fillMaxWidth()
                                 .height(1.dp)
                                 .align(Alignment.TopCenter)
-                                .offset(y = 160.dp)
+                                .offset(y = (boxH.value * 0.33f).dp)
                                 .background(Color.White.copy(alpha = 0.25f))
                         )
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(1.dp)
-                                .align(Alignment.BottomCenter)
-                                .offset(y = (-160).dp)
+                                .align(Alignment.TopCenter)
+                                .offset(y = (boxH.value * 0.66f).dp)
                                 .background(Color.White.copy(alpha = 0.25f))
                         )
                     }

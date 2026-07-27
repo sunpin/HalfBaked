@@ -107,7 +107,7 @@ fun MainAppNavHost() {
                 modifier = Modifier.padding(24.dp)
             ) {
                 Text(
-                    text = "NOAICAM",
+                    text = "HalfBaked",
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,
                     color = RawGold

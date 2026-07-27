@@ -64,8 +64,8 @@
 38        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
 38-->[androidx.core:core:1.12.0] C:\Users\meson\.gradle\caches\transforms-3\0b11219c2b5fc1bb9b788fbc960b37f9\transformed\core-1.12.0\AndroidManifest.xml:28:18-86
 39        android:extractNativeLibs="false"
-40        android:label="NOAICAM"
-40-->C:\work\sunpin\NOAICAM\app\src\main\AndroidManifest.xml:21:9-32
+40        android:label="HalfBaked"
+40-->C:\work\sunpin\NOAICAM\app\src\main\AndroidManifest.xml:21:9-34
 41        android:supportsRtl="true"
 41-->C:\work\sunpin\NOAICAM\app\src\main\AndroidManifest.xml:22:9-35
 42        android:theme="@style/Theme.NOAICAM" >

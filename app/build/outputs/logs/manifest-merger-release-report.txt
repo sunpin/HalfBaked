@@ -129,7 +129,7 @@ MERGED from [androidx.startup:startup-runtime:1.1.1] C:\Users\meson\.gradle\cach
 	android:supportsRtl
 		ADDED from C:\work\sunpin\NOAICAM\app\src\main\AndroidManifest.xml:22:9-35
 	android:label
-		ADDED from C:\work\sunpin\NOAICAM\app\src\main\AndroidManifest.xml:21:9-32
+		ADDED from C:\work\sunpin\NOAICAM\app\src\main\AndroidManifest.xml:21:9-34
 	android:allowBackup
 		ADDED from C:\work\sunpin\NOAICAM\app\src\main\AndroidManifest.xml:20:9-35
 	android:theme

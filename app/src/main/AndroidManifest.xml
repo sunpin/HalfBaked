@@ -18,7 +18,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="NOAICAM"
+        android:label="HalfBaked"
         android:supportsRtl="true"
         android:theme="@style/Theme.NOAICAM">
         <activity

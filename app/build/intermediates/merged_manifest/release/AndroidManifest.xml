@@ -37,7 +37,7 @@
         android:allowBackup="true"
         android:appComponentFactory="androidx.core.app.CoreComponentFactory"
         android:extractNativeLibs="false"
-        android:label="NOAICAM"
+        android:label="HalfBaked"
         android:supportsRtl="true"
         android:theme="@style/Theme.NOAICAM" >
         <activity
