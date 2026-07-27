@@ -1,5 +1,6 @@
 package com.noaicam.ui
 
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
 import android.view.TextureView
@@ -32,6 +33,7 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -196,6 +198,7 @@ fun CameraScreen(
             val surface = tv.surfaceTexture
             if (surface != null) {
                 cameraManager.openCamera(surface, tv.width, tv.height, lensId)
+                cameraManager.configureTransform(tv, tv.width, tv.height)
                 cameraManager.setZoomRatio(1.0f)
                 cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                 cameraManager.setFlashMode(flashMode)
@@ -220,6 +223,7 @@ fun CameraScreen(
                         val surface = tv.surfaceTexture
                         if (surface != null) {
                             cameraManager.openCamera(surface, tv.width, tv.height, activeLensId)
+                            cameraManager.configureTransform(tv, tv.width, tv.height)
                             cameraManager.setZoomRatio(zoomRatio) // Restore previous saved zoom!
                             cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                             cameraManager.setFlashMode(flashMode)
@@ -281,30 +285,28 @@ fun CameraScreen(
             .fillMaxSize()
             .background(DarkBackground)
     ) {
-        // 1. DYNAMIC LETTERBOX/PILLARBOX VIEWFINDER (MAXIMIZED LANDSCAPE VIEWPORT ALLOWING OVERLAY BUTTONS)
+        // 1. DYNAMIC ORIENTATION & LETTERBOX/PILLARBOX VIEWFINDER
         BoxWithConstraints(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            val containerW = maxWidth
-            val containerH = maxHeight
+            val configuration = LocalConfiguration.current
+            val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-            val isLandscape = containerW > containerH
             val sensorRatio = if (cameraManager.sensorAspectRatio > 0f) cameraManager.sensorAspectRatio else (4f / 3f)
 
             // Target aspect ratio (width / height)
             val targetAspectRatio = if (isLandscape) sensorRatio else (1f / sensorRatio)
-            val containerAspect = if (containerH.value > 0f) containerW.value / containerH.value else 1.0f
 
             val (boxW, boxH) = if (isLandscape) {
-                // In landscape mode: maximize height and allow buttons/UI to overlay transparently
-                val h = containerH
-                val w = (h * targetAspectRatio).coerceAtMost(containerW)
+                // In landscape mode: maximize height and fit width to landscape aspect ratio
+                val h = maxHeight
+                val w = (h * targetAspectRatio).coerceAtMost(maxWidth)
                 Pair(w, h)
             } else {
-                // In portrait mode: fit within screen bounds
-                val w = containerW
-                val h = (w / targetAspectRatio).coerceAtMost(containerH)
+                // In portrait mode: maximize width and fit height to portrait aspect ratio
+                val w = maxWidth
+                val h = (w / targetAspectRatio).coerceAtMost(maxHeight)
                 Pair(w, h)
             }
 
@@ -359,6 +361,7 @@ fun CameraScreen(
                                     height: Int
                                 ) {
                                     cameraManager.openCamera(surface, width, height, activeLensId)
+                                    cameraManager.configureTransform(this@apply, width, height)
                                     cameraManager.setZoomRatio(zoomRatio)
                                     cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                                     cameraManager.setFlashMode(flashMode)
@@ -369,7 +372,9 @@ fun CameraScreen(
                                     surface: SurfaceTexture,
                                     width: Int,
                                     height: Int
-                                ) {}
+                                ) {
+                                    cameraManager.configureTransform(this@apply, width, height)
+                                }
 
                                 override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
                                     cameraManager.closeCamera()
