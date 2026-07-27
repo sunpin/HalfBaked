@@ -548,7 +548,7 @@ class Camera2RawManager(private val context: Context) {
                         currentIso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: manualIso
                         currentShutterNanos = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: manualShutterNanos
 
-                        // Extract Live Focus Distance in Meters/CM
+                        // Extract Live Focus Distance in Meters/CM continuously on every frame
                         val distDiopters = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
                         if (distDiopters != null) {
                             val text = if (distDiopters <= 0.05f) {
@@ -567,6 +567,7 @@ class Camera2RawManager(private val context: Context) {
                             }
                         }
 
+                        // Continuously update Focus Status (Green = In Focus, Yellow = Searching, Red = Out of Focus/Failed)
                         val afState = result.get(CaptureResult.CONTROL_AF_STATE)
                         if (afState != null) {
                             when (afState) {
@@ -576,7 +577,8 @@ class Camera2RawManager(private val context: Context) {
                                 CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED,
                                 CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED -> postFocusStatus(FocusStatus.LOCKED)
 
-                                CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED -> postFocusStatus(FocusStatus.FAILED)
+                                CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED,
+                                CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED -> postFocusStatus(FocusStatus.FAILED)
                             }
                         }
                     }
@@ -652,7 +654,8 @@ class Camera2RawManager(private val context: Context) {
                     if (afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED ||
                         afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED) {
                         postFocusStatus(FocusStatus.LOCKED)
-                    } else if (afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED) {
+                    } else if (afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED ||
+                        afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED) {
                         postFocusStatus(FocusStatus.FAILED)
                     } else {
                         postFocusStatus(FocusStatus.LOCKED)
