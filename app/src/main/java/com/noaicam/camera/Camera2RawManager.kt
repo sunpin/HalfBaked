@@ -525,12 +525,11 @@ class Camera2RawManager(private val context: Context) {
             applyFlashControl(builder, isStillCapture = false)
             applyZoom(builder)
 
+            // Always use CONTINUOUS_PICTURE so camera continuously auto-focuses on whatever object is inside activeMeteringRegion!
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
             if (activeMeteringRegion != null) {
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
                 builder.set(CaptureRequest.CONTROL_AF_REGIONS, activeMeteringRegion)
                 builder.set(CaptureRequest.CONTROL_AE_REGIONS, activeMeteringRegion)
-            } else {
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
             }
 
             builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
@@ -602,7 +601,6 @@ class Camera2RawManager(private val context: Context) {
             val sensorRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                 ?: Rect(0, 0, 4000, 3000)
 
-            val facing = characteristics.get(CameraCharacteristics.LENS_FACING) ?: CameraCharacteristics.LENS_FACING_BACK
             val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
 
             // 90° Sensor Coordinate System Transformation (UI 3:4 Portrait -> Sensor Rect)
@@ -661,7 +659,7 @@ class Camera2RawManager(private val context: Context) {
                         postFocusStatus(FocusStatus.LOCKED)
                     }
 
-                    // Keep repeating request locked on tapped region!
+                    // Re-engage CONTINUOUS_PICTURE so camera CONTINUOUSLY re-focuses on new objects under the tapped ring as you move!
                     updatePreviewSession()
                 }
             }, backgroundHandler)
