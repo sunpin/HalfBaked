@@ -72,6 +72,8 @@ class Camera2RawManager(private val context: Context) {
 
     var isRawSupported: Boolean = false
         private set
+    var isFixedFocusLens: Boolean = false
+        private set
     var currentIso: Int = 100
         private set
     var currentShutterNanos: Long = 10000000L
@@ -291,6 +293,10 @@ class Camera2RawManager(private val context: Context) {
 
             val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
             isRawSupported = capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW)
+
+            // Inspect lens minimum focus distance to determine if this is a Fixed Focus (pan-focus) lens
+            val minFocusDist = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+            isFixedFocusLens = (minFocusDist == null || minFocusDist == 0.0f)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val range = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
@@ -525,11 +531,14 @@ class Camera2RawManager(private val context: Context) {
             applyFlashControl(builder, isStillCapture = false)
             applyZoom(builder)
 
-            // Always use CONTINUOUS_PICTURE so camera continuously auto-focuses on whatever object is inside activeMeteringRegion!
-            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-            if (activeMeteringRegion != null) {
-                builder.set(CaptureRequest.CONTROL_AF_REGIONS, activeMeteringRegion)
-                builder.set(CaptureRequest.CONTROL_AE_REGIONS, activeMeteringRegion)
+            if (!isFixedFocusLens) {
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                if (activeMeteringRegion != null) {
+                    builder.set(CaptureRequest.CONTROL_AF_REGIONS, activeMeteringRegion)
+                    builder.set(CaptureRequest.CONTROL_AE_REGIONS, activeMeteringRegion)
+                }
+            } else {
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
             }
 
             builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
@@ -547,37 +556,45 @@ class Camera2RawManager(private val context: Context) {
                         currentIso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: manualIso
                         currentShutterNanos = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: manualShutterNanos
 
-                        // Extract Live Focus Distance in Meters/CM continuously on every frame
-                        val distDiopters = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
-                        if (distDiopters != null) {
-                            val text = if (distDiopters <= 0.05f) {
-                                "∞"
-                            } else {
-                                val meters = 1.0f / distDiopters
-                                if (meters >= 1.0f) {
-                                    "%.1fm".format(meters)
+                        if (isFixedFocusLens) {
+                            if (currentFocusDistanceText != "パンフォーカス") {
+                                currentFocusDistanceText = "パンフォーカス"
+                                postFocusDistance("パンフォーカス")
+                            }
+                            postFocusStatus(FocusStatus.LOCKED)
+                        } else {
+                            // Extract Live Focus Distance in Meters/CM continuously on every frame
+                            val distDiopters = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                            if (distDiopters != null) {
+                                val text = if (distDiopters <= 0.05f) {
+                                    "∞"
                                 } else {
-                                    "${(meters * 100).toInt()}cm"
+                                    val meters = 1.0f / distDiopters
+                                    if (meters >= 1.0f) {
+                                        "%.1fm".format(meters)
+                                    } else {
+                                        "${(meters * 100).toInt()}cm"
+                                    }
+                                }
+                                if (text != currentFocusDistanceText) {
+                                    currentFocusDistanceText = text
+                                    postFocusDistance(text)
                                 }
                             }
-                            if (text != currentFocusDistanceText) {
-                                currentFocusDistanceText = text
-                                postFocusDistance(text)
-                            }
-                        }
 
-                        // Continuously update Focus Status (Green = In Focus, Yellow = Searching, Red = Out of Focus/Failed)
-                        val afState = result.get(CaptureResult.CONTROL_AF_STATE)
-                        if (afState != null) {
-                            when (afState) {
-                                CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN,
-                                CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN -> postFocusStatus(FocusStatus.SEARCHING)
+                            // Continuously update Focus Status (Green = In Focus, Yellow = Searching, Red = Out of Focus/Failed)
+                            val afState = result.get(CaptureResult.CONTROL_AF_STATE)
+                            if (afState != null) {
+                                when (afState) {
+                                    CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN,
+                                    CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN -> postFocusStatus(FocusStatus.SEARCHING)
 
-                                CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED,
-                                CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED -> postFocusStatus(FocusStatus.LOCKED)
+                                    CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED,
+                                    CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED -> postFocusStatus(FocusStatus.LOCKED)
 
-                                CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED,
-                                CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED -> postFocusStatus(FocusStatus.FAILED)
+                                    CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED,
+                                    CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED -> postFocusStatus(FocusStatus.FAILED)
+                                }
                             }
                         }
                     }
@@ -594,6 +611,11 @@ class Camera2RawManager(private val context: Context) {
         val device = cameraDevice ?: return
         val characteristics = cameraCharacteristics ?: return
         val surface = previewSurfaceRef ?: return
+
+        if (isFixedFocusLens) {
+            postFocusStatus(FocusStatus.LOCKED)
+            return
+        }
 
         try {
             postFocusStatus(FocusStatus.SEARCHING)
@@ -684,7 +706,7 @@ class Camera2RawManager(private val context: Context) {
             applyZoom(captureBuilder)
 
             // Preserve active tap-to-focus metering region for still photo capture!
-            if (activeMeteringRegion != null) {
+            if (!isFixedFocusLens && activeMeteringRegion != null) {
                 captureBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
                 captureBuilder.set(CaptureRequest.CONTROL_AF_REGIONS, activeMeteringRegion)
                 captureBuilder.set(CaptureRequest.CONTROL_AE_REGIONS, activeMeteringRegion)
