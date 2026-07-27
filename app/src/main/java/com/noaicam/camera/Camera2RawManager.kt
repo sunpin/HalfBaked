@@ -3,9 +3,7 @@ package com.noaicam.camera
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.ImageFormat
-import android.graphics.Matrix
 import android.graphics.Rect
-import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.params.MeteringRectangle
@@ -23,8 +21,6 @@ import android.util.Log
 import android.util.Size
 import android.view.OrientationEventListener
 import android.view.Surface
-import android.view.TextureView
-import android.view.WindowManager
 import com.noaicam.data.FlashMode
 import com.noaicam.data.RawImageData
 import java.io.File
@@ -330,51 +326,6 @@ class Camera2RawManager(private val context: Context) {
             cameraOpenCloseLock.release()
             Log.e(TAG, "Error opening camera", e)
         }
-    }
-
-    fun configureTransform(textureView: TextureView, viewWidth: Int, viewHeight: Int) {
-        if (viewWidth == 0 || viewHeight == 0) return
-
-        val displayRotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            context.display?.rotation ?: Surface.ROTATION_0
-        } else {
-            @Suppress("DEPRECATION")
-            (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
-                ?.defaultDisplay?.rotation ?: Surface.ROTATION_0
-        }
-
-        val matrix = Matrix()
-        val viewRect = RectF(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
-        val centerX = viewRect.centerX()
-        val centerY = viewRect.centerY()
-
-        val sensorOrientation = cameraCharacteristics?.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
-
-        val displayDegree = when (displayRotation) {
-            Surface.ROTATION_90 -> 90
-            Surface.ROTATION_180 -> 180
-            Surface.ROTATION_270 -> 270
-            else -> 0
-        }
-
-        val totalRotation = (sensorOrientation - displayDegree + 360) % 360
-
-        if (totalRotation == 90 || totalRotation == 270) {
-            val bufferRect = RectF(0f, 0f, previewSize.height.toFloat(), previewSize.width.toFloat())
-            bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
-            matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL)
-
-            val scale = Math.max(
-                viewHeight.toFloat() / previewSize.height,
-                viewWidth.toFloat() / previewSize.width
-            )
-            matrix.postScale(scale, scale, centerX, centerY)
-            matrix.postRotate((if (totalRotation == 90) 90f else -90f), centerX, centerY)
-        } else if (totalRotation == 180) {
-            matrix.postRotate(180f, centerX, centerY)
-        }
-
-        textureView.setTransform(matrix)
     }
 
     private fun setupImageReadersAndPreviewSize(map: StreamConfigurationMap?) {

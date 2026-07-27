@@ -198,7 +198,6 @@ fun CameraScreen(
             val surface = tv.surfaceTexture
             if (surface != null) {
                 cameraManager.openCamera(surface, tv.width, tv.height, lensId)
-                cameraManager.configureTransform(tv, tv.width, tv.height)
                 cameraManager.setZoomRatio(1.0f)
                 cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                 cameraManager.setFlashMode(flashMode)
@@ -223,7 +222,6 @@ fun CameraScreen(
                         val surface = tv.surfaceTexture
                         if (surface != null) {
                             cameraManager.openCamera(surface, tv.width, tv.height, activeLensId)
-                            cameraManager.configureTransform(tv, tv.width, tv.height)
                             cameraManager.setZoomRatio(zoomRatio) // Restore previous saved zoom!
                             cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
                             cameraManager.setFlashMode(flashMode)
@@ -279,218 +277,395 @@ fun CameraScreen(
         }
     }
 
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     // SINGLE STABLE BOX LAYOUT
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(DarkBackground)
     ) {
-        // 1. DYNAMIC ORIENTATION & LETTERBOX/PILLARBOX VIEWFINDER
-        BoxWithConstraints(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            val configuration = LocalConfiguration.current
-            val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        // 1. VIEWFINDER CONTAINER (PORTRAIT: STABLE 3:4 BOX; LANDSCAPE: MAX-HEIGHT OVERLAY BOX)
+        if (isLandscape) {
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                val boxH = maxHeight
+                val boxW = (boxH * 4f / 3f).coerceAtMost(maxWidth)
 
-            val sensorRatio = if (cameraManager.sensorAspectRatio > 0f) cameraManager.sensorAspectRatio else (4f / 3f)
-
-            // Target aspect ratio (width / height)
-            val targetAspectRatio = if (isLandscape) sensorRatio else (1f / sensorRatio)
-
-            val (boxW, boxH) = if (isLandscape) {
-                // In landscape mode: maximize height and fit width to landscape aspect ratio
-                val h = maxHeight
-                val w = (h * targetAspectRatio).coerceAtMost(maxWidth)
-                Pair(w, h)
-            } else {
-                // In portrait mode: maximize width and fit height to portrait aspect ratio
-                val w = maxWidth
-                val h = (w / targetAspectRatio).coerceAtMost(maxHeight)
-                Pair(w, h)
-            }
-
-            Box(
-                modifier = Modifier
-                    .size(boxW, boxH)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Black)
-                    .drawWithContent {
-                        val paint = Paint().apply {
-                            colorFilter = ColorFilter.colorMatrix(liveColorMatrix)
-                        }
-                        drawIntoCanvas { canvas ->
-                            canvas.saveLayer(size.toRect(), paint)
-                            drawContent()
-                            canvas.restore()
-                        }
-                    }
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, _, zoom, _ ->
-                            zoomRatio = (zoomRatio * zoom).coerceIn(1.0f, cameraManager.maxZoomRatio)
-                            settingsManager.savedZoomRatio = zoomRatio
-                            cameraManager.setZoomRatio(zoomRatio)
-                        }
-                    }
-                    .pointerInput(Unit) {
-                        detectTapGestures { offset ->
-                            focusTapOffset = offset
-                            focusStatus = FocusStatus.SEARCHING
-                            val width = size.width
-                            val height = size.height
-                            if (width > 0 && height > 0) {
-                                cameraManager.triggerFocusAt(
-                                    xNorm = offset.x / width,
-                                    yNorm = offset.y / height,
-                                    viewWidth = width,
-                                    viewHeight = height
-                                )
+                Box(
+                    modifier = Modifier
+                        .size(boxW, boxH)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black)
+                        .drawWithContent {
+                            val paint = Paint().apply {
+                                colorFilter = ColorFilter.colorMatrix(liveColorMatrix)
+                            }
+                            drawIntoCanvas { canvas ->
+                                canvas.saveLayer(size.toRect(), paint)
+                                drawContent()
+                                canvas.restore()
                             }
                         }
-                    }
-            ) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        TextureView(ctx).apply {
-                            textureViewRef = this
-                            surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                                override fun onSurfaceTextureAvailable(
-                                    surface: SurfaceTexture,
-                                    width: Int,
-                                    height: Int
-                                ) {
-                                    cameraManager.openCamera(surface, width, height, activeLensId)
-                                    cameraManager.configureTransform(this@apply, width, height)
-                                    cameraManager.setZoomRatio(zoomRatio)
-                                    cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
-                                    cameraManager.setFlashMode(flashMode)
-                                    isRawHardwareSupported = cameraManager.isRawSupported
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, _, zoom, _ ->
+                                zoomRatio = (zoomRatio * zoom).coerceIn(1.0f, cameraManager.maxZoomRatio)
+                                settingsManager.savedZoomRatio = zoomRatio
+                                cameraManager.setZoomRatio(zoomRatio)
+                            }
+                        }
+                        .pointerInput(Unit) {
+                            detectTapGestures { offset ->
+                                focusTapOffset = offset
+                                focusStatus = FocusStatus.SEARCHING
+                                val width = size.width
+                                val height = size.height
+                                if (width > 0 && height > 0) {
+                                    cameraManager.triggerFocusAt(
+                                        xNorm = offset.x / width,
+                                        yNorm = offset.y / height,
+                                        viewWidth = width,
+                                        viewHeight = height
+                                    )
                                 }
+                            }
+                        }
+                ) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            TextureView(ctx).apply {
+                                textureViewRef = this
+                                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                                    override fun onSurfaceTextureAvailable(
+                                        surface: SurfaceTexture,
+                                        width: Int,
+                                        height: Int
+                                    ) {
+                                        cameraManager.openCamera(surface, width, height, activeLensId)
+                                        cameraManager.setZoomRatio(zoomRatio)
+                                        cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
+                                        cameraManager.setFlashMode(flashMode)
+                                        isRawHardwareSupported = cameraManager.isRawSupported
+                                    }
 
-                                override fun onSurfaceTextureSizeChanged(
-                                    surface: SurfaceTexture,
-                                    width: Int,
-                                    height: Int
-                                ) {
-                                    cameraManager.configureTransform(this@apply, width, height)
-                                }
+                                    override fun onSurfaceTextureSizeChanged(
+                                        surface: SurfaceTexture,
+                                        width: Int,
+                                        height: Int
+                                    ) {}
 
-                                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                                    cameraManager.closeCamera()
-                                    return true
-                                }
+                                    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                                        cameraManager.closeCamera()
+                                        return true
+                                    }
 
-                                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
-                                    currentIso = cameraManager.currentIso
-                                    val shutterNanos = cameraManager.currentShutterNanos
-                                    if (shutterNanos > 0) {
-                                        val seconds = shutterNanos / 1_000_000_000.0
-                                        currentShutter = if (seconds >= 1.0) {
-                                            "%.1fs".format(seconds)
-                                        } else {
-                                            val denom = (1.0 / seconds).roundToInt()
-                                            "1/${denom}s"
+                                    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
+                                        currentIso = cameraManager.currentIso
+                                        val shutterNanos = cameraManager.currentShutterNanos
+                                        if (shutterNanos > 0) {
+                                            val seconds = shutterNanos / 1_000_000_000.0
+                                            currentShutter = if (seconds >= 1.0) {
+                                                "%.1fs".format(seconds)
+                                            } else {
+                                                val denom = (1.0 / seconds).roundToInt()
+                                                "1/${denom}s"
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                )
+                    )
 
-                // Grid Overlay
-                if (showGrid) {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .width(1.dp)
-                                .align(Alignment.CenterStart)
-                                .offset(x = (boxW.value * 0.33f).dp)
-                                .background(Color.White.copy(alpha = 0.25f))
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .width(1.dp)
-                                .align(Alignment.CenterStart)
-                                .offset(x = (boxW.value * 0.66f).dp)
-                                .background(Color.White.copy(alpha = 0.25f))
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .align(Alignment.TopCenter)
-                                .offset(y = (boxH.value * 0.33f).dp)
-                                .background(Color.White.copy(alpha = 0.25f))
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .align(Alignment.TopCenter)
-                                .offset(y = (boxH.value * 0.66f).dp)
-                                .background(Color.White.copy(alpha = 0.25f))
-                        )
-                    }
-                }
-
-                // Zoom Ratio Floating Badge
-                if (zoomRatio > 1.05f) {
-                    Surface(
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = 16.dp),
-                        color = DarkSurface.copy(alpha = 0.85f),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(
-                            text = "%.1fx".format(zoomRatio),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = RawGold,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-
-                // Tap-to-Focus Ring Overlay
-                focusTapOffset?.let { offset ->
-                    LaunchedEffect(focusStatus) {
-                        if (focusStatus == FocusStatus.LOCKED || focusStatus == FocusStatus.FAILED) {
-                            delay(1800)
-                            focusTapOffset = null
-                            focusStatus = FocusStatus.IDLE
+                    // Grid Overlay
+                    if (showGrid) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(1.dp)
+                                    .align(Alignment.CenterStart)
+                                    .offset(x = (boxW.value * 0.33f).dp)
+                                    .background(Color.White.copy(alpha = 0.25f))
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(1.dp)
+                                    .align(Alignment.CenterStart)
+                                    .offset(x = (boxW.value * 0.66f).dp)
+                                    .background(Color.White.copy(alpha = 0.25f))
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .align(Alignment.TopCenter)
+                                    .offset(y = (boxH.value * 0.33f).dp)
+                                    .background(Color.White.copy(alpha = 0.25f))
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .align(Alignment.TopCenter)
+                                    .offset(y = (boxH.value * 0.66f).dp)
+                                    .background(Color.White.copy(alpha = 0.25f))
+                            )
                         }
                     }
 
-                    val ringColor = when (focusStatus) {
-                        FocusStatus.SEARCHING -> RawGold
-                        FocusStatus.LOCKED -> RawBypassGreen
-                        FocusStatus.FAILED -> Color.Red
-                        FocusStatus.IDLE -> RawGold
+                    // Zoom Ratio Floating Badge
+                    if (zoomRatio > 1.05f) {
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 16.dp),
+                            color = DarkSurface.copy(alpha = 0.85f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                text = "%.1fx".format(zoomRatio),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = RawGold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .offset { IntOffset(offset.x.toInt() - 40, offset.y.toInt() - 40) }
-                            .size(80.dp)
-                            .border(
-                                width = if (focusStatus == FocusStatus.LOCKED) 3.dp else 2.dp,
-                                color = ringColor,
-                                shape = CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (focusStatus == FocusStatus.LOCKED) {
+                    // Tap-to-Focus Ring Overlay
+                    focusTapOffset?.let { offset ->
+                        LaunchedEffect(focusStatus) {
+                            if (focusStatus == FocusStatus.LOCKED || focusStatus == FocusStatus.FAILED) {
+                                delay(1800)
+                                focusTapOffset = null
+                                focusStatus = FocusStatus.IDLE
+                            }
+                        }
+
+                        val ringColor = when (focusStatus) {
+                            FocusStatus.SEARCHING -> RawGold
+                            FocusStatus.LOCKED -> RawBypassGreen
+                            FocusStatus.FAILED -> Color.Red
+                            FocusStatus.IDLE -> RawGold
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .offset { IntOffset(offset.x.toInt() - 40, offset.y.toInt() - 40) }
+                                .size(80.dp)
+                                .border(
+                                    width = if (focusStatus == FocusStatus.LOCKED) 3.dp else 2.dp,
+                                    color = ringColor,
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (focusStatus == FocusStatus.LOCKED) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(RawBypassGreen)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(top = 90.dp, bottom = 145.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(3f / 4f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black)
+                        .drawWithContent {
+                            val paint = Paint().apply {
+                                colorFilter = ColorFilter.colorMatrix(liveColorMatrix)
+                            }
+                            drawIntoCanvas { canvas ->
+                                canvas.saveLayer(size.toRect(), paint)
+                                drawContent()
+                                canvas.restore()
+                            }
+                        }
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, _, zoom, _ ->
+                                zoomRatio = (zoomRatio * zoom).coerceIn(1.0f, cameraManager.maxZoomRatio)
+                                settingsManager.savedZoomRatio = zoomRatio
+                                cameraManager.setZoomRatio(zoomRatio)
+                            }
+                        }
+                        .pointerInput(Unit) {
+                            detectTapGestures { offset ->
+                                focusTapOffset = offset
+                                focusStatus = FocusStatus.SEARCHING
+                                val width = size.width
+                                val height = size.height
+                                if (width > 0 && height > 0) {
+                                    cameraManager.triggerFocusAt(
+                                        xNorm = offset.x / width,
+                                        yNorm = offset.y / height,
+                                        viewWidth = width,
+                                        viewHeight = height
+                                    )
+                                }
+                            }
+                        }
+                ) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            TextureView(ctx).apply {
+                                textureViewRef = this
+                                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                                    override fun onSurfaceTextureAvailable(
+                                        surface: SurfaceTexture,
+                                        width: Int,
+                                        height: Int
+                                    ) {
+                                        cameraManager.openCamera(surface, width, height, activeLensId)
+                                        cameraManager.setZoomRatio(zoomRatio)
+                                        cameraManager.setManualAe(isManualAe, selectedIso, selectedShutterNanos)
+                                        cameraManager.setFlashMode(flashMode)
+                                        isRawHardwareSupported = cameraManager.isRawSupported
+                                    }
+
+                                    override fun onSurfaceTextureSizeChanged(
+                                        surface: SurfaceTexture,
+                                        width: Int,
+                                        height: Int
+                                    ) {}
+
+                                    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                                        cameraManager.closeCamera()
+                                        return true
+                                    }
+
+                                    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
+                                        currentIso = cameraManager.currentIso
+                                        val shutterNanos = cameraManager.currentShutterNanos
+                                        if (shutterNanos > 0) {
+                                            val seconds = shutterNanos / 1_000_000_000.0
+                                            currentShutter = if (seconds >= 1.0) {
+                                                "%.1fs".format(seconds)
+                                            } else {
+                                                val denom = (1.0 / seconds).roundToInt()
+                                                "1/${denom}s"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    )
+
+                    // Grid Overlay
+                    if (showGrid) {
+                        Box(modifier = Modifier.fillMaxSize()) {
                             Box(
                                 modifier = Modifier
-                                    .size(10.dp)
-                                    .clip(CircleShape)
-                                    .background(RawBypassGreen)
+                                    .fillMaxHeight()
+                                    .width(1.dp)
+                                    .align(Alignment.CenterStart)
+                                    .offset(x = 110.dp)
+                                    .background(Color.White.copy(alpha = 0.25f))
                             )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(1.dp)
+                                    .align(Alignment.CenterEnd)
+                                    .offset(x = (-110).dp)
+                                    .background(Color.White.copy(alpha = 0.25f))
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .align(Alignment.TopCenter)
+                                    .offset(y = 160.dp)
+                                    .background(Color.White.copy(alpha = 0.25f))
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .align(Alignment.BottomCenter)
+                                    .offset(y = (-160).dp)
+                                    .background(Color.White.copy(alpha = 0.25f))
+                            )
+                        }
+                    }
+
+                    // Zoom Ratio Floating Badge
+                    if (zoomRatio > 1.05f) {
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 16.dp),
+                            color = DarkSurface.copy(alpha = 0.85f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                text = "%.1fx".format(zoomRatio),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = RawGold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    // Tap-to-Focus Ring Overlay
+                    focusTapOffset?.let { offset ->
+                        LaunchedEffect(focusStatus) {
+                            if (focusStatus == FocusStatus.LOCKED || focusStatus == FocusStatus.FAILED) {
+                                delay(1800)
+                                focusTapOffset = null
+                                focusStatus = FocusStatus.IDLE
+                            }
+                        }
+
+                        val ringColor = when (focusStatus) {
+                            FocusStatus.SEARCHING -> RawGold
+                            FocusStatus.LOCKED -> RawBypassGreen
+                            FocusStatus.FAILED -> Color.Red
+                            FocusStatus.IDLE -> RawGold
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .offset { IntOffset(offset.x.toInt() - 40, offset.y.toInt() - 40) }
+                                .size(80.dp)
+                                .border(
+                                    width = if (focusStatus == FocusStatus.LOCKED) 3.dp else 2.dp,
+                                    color = ringColor,
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (focusStatus == FocusStatus.LOCKED) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(RawBypassGreen)
+                                )
+                            }
                         }
                     }
                 }
