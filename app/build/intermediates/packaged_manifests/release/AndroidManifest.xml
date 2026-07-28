@@ -37,7 +37,9 @@
         android:allowBackup="true"
         android:appComponentFactory="androidx.core.app.CoreComponentFactory"
         android:extractNativeLibs="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="HalfBaked"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.NOAICAM" >
         <activity
