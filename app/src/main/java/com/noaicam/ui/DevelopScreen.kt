@@ -6,7 +6,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -20,8 +21,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +59,12 @@ fun DevelopScreen(
     var params by remember { mutableStateOf(DevelopParams()) }
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Exposure/WB, 1: Tone/Contrast, 2: Color, 3: Crop/Zoom
 
+    // Real-time GPU Transformation states during finger dragging/pinching
+    var isTransforming by remember { mutableStateOf(false) }
+    var liveGestureScale by remember { mutableFloatStateOf(1.0f) }
+    var liveTranslationX by remember { mutableFloatStateOf(0.0f) }
+    var liveTranslationY by remember { mutableFloatStateOf(0.0f) }
+
     // Load RAW image
     LaunchedEffect(dngFilePath) {
         isLoading = true
@@ -66,7 +76,7 @@ fun DevelopScreen(
         isLoading = false
     }
 
-    // Re-render when parameters change
+    // Re-render RAW bitmap when parameters change
     LaunchedEffect(params, originalBitmap) {
         val base = originalBitmap ?: return@LaunchedEffect
         developedBitmap = rawEngine.processBitmap(base, params)
@@ -139,23 +149,58 @@ fun DevelopScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                // Photo Canvas Preview (Upper Area with Pinch-to-Zoom & Pan Gesture Support)
+                // Photo Canvas Preview Container (Instant GPU transformation during touch, Re-render RAW on finger release)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1.0f)
                         .background(Color.Black)
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                val newScale = (params.cropScale * zoom).coerceIn(1.0f, 4.0f)
-                                val panFactor = 0.003f
-                                val newPanX = (params.cropPanX + pan.x * panFactor).coerceIn(-1.0f, 1.0f)
-                                val newPanY = (params.cropPanY + pan.y * panFactor).coerceIn(-1.0f, 1.0f)
-                                params = params.copy(
-                                    cropScale = newScale,
-                                    cropPanX = newPanX,
-                                    cropPanY = newPanY
-                                )
+                        .clipToBounds()
+                        .pointerInput(params) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val changes = event.changes
+                                    val downCount = changes.count { it.pressed }
+
+                                    if (downCount > 0) {
+                                        // User is active dragging/pinching on image
+                                        val pan = event.calculatePan()
+                                        val zoom = event.calculateZoom()
+
+                                        if (pan != Offset.Zero || zoom != 1.0f) {
+                                            isTransforming = true
+                                            liveGestureScale = (liveGestureScale * zoom).coerceIn(0.7f, 5.0f)
+                                            liveTranslationX += pan.x
+                                            liveTranslationY += pan.y
+                                        }
+                                        changes.forEach { it.consume() }
+                                    } else if (isTransforming) {
+                                        // Finger released! Commit final pan & zoom to params and trigger RAW re-render
+                                        val containerW = size.width.toFloat()
+                                        val containerH = size.height.toFloat()
+
+                                        val finalScale = (params.cropScale * liveGestureScale).coerceIn(1.0f, 4.0f)
+
+                                        // Natural drag direction (inverted sign)
+                                        val panXFactor = if (containerW > 0) 2.0f / (containerW * params.cropScale) else 0.003f
+                                        val panYFactor = if (containerH > 0) 2.0f / (containerH * params.cropScale) else 0.003f
+
+                                        val newPanX = (params.cropPanX - liveTranslationX * panXFactor).coerceIn(-1.0f, 1.0f)
+                                        val newPanY = (params.cropPanY - liveTranslationY * panYFactor).coerceIn(-1.0f, 1.0f)
+
+                                        isTransforming = false
+                                        liveGestureScale = 1.0f
+                                        liveTranslationX = 0.0f
+                                        liveTranslationY = 0.0f
+
+                                        params = params.copy(
+                                            cropScale = finalScale,
+                                            cropPanX = newPanX,
+                                            cropPanY = newPanY
+                                        )
+                                    }
+                                }
                             }
                         },
                     contentAlignment = Alignment.Center
@@ -165,7 +210,16 @@ fun DevelopScreen(
                         Image(
                             bitmap = bmp.asImageBitmap(),
                             contentDescription = "RAW Preview",
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    if (isTransforming) {
+                                        scaleX = liveGestureScale
+                                        scaleY = liveGestureScale
+                                        translationX = liveTranslationX
+                                        translationY = liveTranslationY
+                                    }
+                                }
                         )
                     }
 
