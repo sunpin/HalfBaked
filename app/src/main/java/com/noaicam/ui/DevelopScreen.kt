@@ -659,6 +659,18 @@ fun DevelopScreen(
                                         }
                                     }
                                 }
+
+                                if (params.effect != DevelopEffect.NONE) {
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    DevelopSliderControl(
+                                        label = "エフェクト強度・タッチサイズ",
+                                        valueDisplay = "%.2fx".format(params.effectIntensity),
+                                        value = params.effectIntensity,
+                                        valueRange = 0.2f..2.0f,
+                                        onValueChange = { params = params.copy(effectIntensity = it) },
+                                        onReset = { params = params.copy(effectIntensity = 1.0f) }
+                                    )
+                                }
                             }
                         }
                     }

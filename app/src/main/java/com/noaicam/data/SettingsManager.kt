@@ -116,6 +116,10 @@ class SettingsManager(context: Context) {
         }
         set(value) = prefs.edit().putString("develop_effect", value.name).apply()
 
+    var effectIntensity: Float
+        get() = prefs.getFloat("develop_effect_intensity", 1.0f)
+        set(value) = prefs.edit().putFloat("develop_effect_intensity", value).apply()
+
     var zoomCropMode: ZoomCropMode
         get() {
             val name = prefs.getString("zoom_crop_mode", ZoomCropMode.CROP_UPSCALE.name)
@@ -143,6 +147,7 @@ class SettingsManager(context: Context) {
             cropPanX = cropPanX,
             cropPanY = cropPanY,
             effect = effect,
+            effectIntensity = effectIntensity,
             zoomCropMode = zoomCropMode
         )
     }
@@ -162,6 +167,7 @@ class SettingsManager(context: Context) {
         cropPanX = params.cropPanX
         cropPanY = params.cropPanY
         effect = params.effect
+        effectIntensity = params.effectIntensity
         zoomCropMode = params.zoomCropMode
     }
 }

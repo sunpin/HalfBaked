@@ -8,10 +8,10 @@ enum class ZoomCropMode(val label: String) {
 
 enum class DevelopEffect(val label: String) {
     NONE("なし (標準現像)"),
-    GRAVURE("グラビア調 (点描・網点印刷)"),
+    GRAVURE("グラビア調 (網点印刷)"),
     SUPER_PORTRAIT("スーパーポートレート (美肌/ソフトグロウ)"),
     OIL_PAINT("油絵調 (オイルペイント)"),
-    PEN_SKETCH("ペン画調 (インクスケッチ)"),
+    PEN_SKETCH("ペン画調 (カラーインクスケッチ)"),
     ANIME("アニメ調 (セル画風)"),
     RETRO_FILM("レトロフィルム (トイカメラ)"),
     NOIR("モノクロノワール (高コントラスト白黒)")
@@ -41,5 +41,6 @@ data class DevelopParams(
     val cropPanX: Float = 0f,                  // -1.0f to +1.0f (左右クロップ位置)
     val cropPanY: Float = 0f,                  // -1.0f to +1.0f (上下クロップ位置)
     val effect: DevelopEffect = DevelopEffect.NONE, // アートエフェクト
+    val effectIntensity: Float = 1.0f,         // 0.2f to 2.0f (エフェクト強度・タッチサイズ)
     val zoomCropMode: ZoomCropMode = ZoomCropMode.CROP_UPSCALE // ズーム現像モード
 )

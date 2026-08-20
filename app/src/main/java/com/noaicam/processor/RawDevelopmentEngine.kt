@@ -220,40 +220,42 @@ class RawDevelopmentEngine(private val context: Context) {
 
             // 9. Art Effect Filters (if selected)
             if (params.effect != DevelopEffect.NONE) {
-                applyArtEffect(sharpenedBitmap, params.effect)
+                applyArtEffect(sharpenedBitmap, params.effect, params.effectIntensity)
             } else {
                 sharpenedBitmap
             }
         }
 
-    private fun applyArtEffect(src: Bitmap, effect: DevelopEffect): Bitmap {
+    private fun applyArtEffect(src: Bitmap, effect: DevelopEffect, intensity: Float): Bitmap {
         return when (effect) {
-            DevelopEffect.GRAVURE -> applyGravureHalftoneEffect(src)
-            DevelopEffect.SUPER_PORTRAIT -> applySuperPortraitEffect(src)
-            DevelopEffect.OIL_PAINT -> applyOilPaintEffect(src)
-            DevelopEffect.PEN_SKETCH -> applyPenSketchEffect(src)
-            DevelopEffect.ANIME -> applyAnimeEffect(src)
-            DevelopEffect.RETRO_FILM -> applyRetroFilmEffect(src)
-            DevelopEffect.NOIR -> applyNoirEffect(src)
+            DevelopEffect.GRAVURE -> applyCmykGravureHalftoneEffect(src, intensity)
+            DevelopEffect.SUPER_PORTRAIT -> applySuperPortraitEffect(src, intensity)
+            DevelopEffect.OIL_PAINT -> applyKuwaharaOilPaintEffect(src, intensity)
+            DevelopEffect.PEN_SKETCH -> applyColorPenSketchEffect(src, intensity)
+            DevelopEffect.ANIME -> applyCelShadedAnimeEffect(src, intensity)
+            DevelopEffect.RETRO_FILM -> applyRetroFilmEffect(src, intensity)
+            DevelopEffect.NOIR -> applyNoirEffect(src, intensity)
             DevelopEffect.NONE -> src
         }
     }
 
-    // 1. グラビア調 (点描・網点印刷 - Gravure Halftone Dot Print)
-    private fun applyGravureHalftoneEffect(src: Bitmap): Bitmap {
+    // 1. グラビア調 (網点印刷 - Authentic CMYK Halftone Screen Printing)
+    private fun applyCmykGravureHalftoneEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
         val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
 
         // Off-white paper background
-        canvas.drawColor(Color.rgb(248, 246, 240))
+        canvas.drawColor(Color.rgb(250, 248, 242))
 
-        val step = Math.max(4, Math.min(w, h) / 180)
+        val step = Math.max(5, (Math.min(w, h) / 130 * intensity).toInt())
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
         val pixels = IntArray(w * h)
         src.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        val maxRadius = step * 0.75f
 
         for (y in 0 until h step step) {
             for (x in 0 until w step step) {
@@ -278,26 +280,37 @@ class RawDevelopmentEngine(private val context: Context) {
                 }
 
                 if (count > 0) {
-                    val avgR = sumR / count
-                    val avgG = sumG / count
-                    val avgB = sumB / count
-                    val lum = (0.299f * avgR + 0.587f * avgG + 0.114f * avgB) / 255f
+                    val r = sumR.toFloat() / (count * 255f)
+                    val g = sumG.toFloat() / (count * 255f)
+                    val b = sumB.toFloat() / (count * 255f)
 
-                    val maxRadius = step * 0.72f
-                    val dotRadius = (1.0f - lum) * maxRadius
+                    val k = 1.0f - Math.max(r, Math.max(g, b))
+                    val c = if (k < 1.0f) (1.0f - r - k) / (1.0f - k) else 0f
+                    val m = if (k < 1.0f) (1.0f - g - k) / (1.0f - k) else 0f
+                    val yCol = if (k < 1.0f) (1.0f - b - k) / (1.0f - k) else 0f
 
-                    if (dotRadius > 0.4f) {
-                        paint.color = Color.rgb(
-                            (avgR * 0.75f).toInt(),
-                            (avgG * 0.75f).toInt(),
-                            (avgB * 0.75f).toInt()
-                        )
-                        canvas.drawCircle(
-                            x + step / 2f,
-                            y + step / 2f,
-                            dotRadius,
-                            paint
-                        )
+                    val centerX = x + step / 2f
+                    val centerY = y + step / 2f
+
+                    // Cyan Dot
+                    if (c > 0.05f) {
+                        paint.color = Color.argb(190, 0, 180, 220)
+                        canvas.drawCircle(centerX - step * 0.1f, centerY - step * 0.1f, c * maxRadius, paint)
+                    }
+                    // Magenta Dot
+                    if (m > 0.05f) {
+                        paint.color = Color.argb(190, 220, 0, 140)
+                        canvas.drawCircle(centerX + step * 0.1f, centerY - step * 0.1f, m * maxRadius, paint)
+                    }
+                    // Yellow Dot
+                    if (yCol > 0.05f) {
+                        paint.color = Color.argb(190, 230, 210, 0)
+                        canvas.drawCircle(centerX, centerY + step * 0.1f, yCol * maxRadius, paint)
+                    }
+                    // Black Dot (K)
+                    if (k > 0.05f) {
+                        paint.color = Color.argb(220, 30, 30, 30)
+                        canvas.drawCircle(centerX, centerY, k * maxRadius, paint)
                     }
                 }
             }
@@ -306,37 +319,33 @@ class RawDevelopmentEngine(private val context: Context) {
     }
 
     // 2. スーパーポートレート (美肌 / ソフトグロウ Orton Bloom)
-    private fun applySuperPortraitEffect(src: Bitmap): Bitmap {
+    private fun applySuperPortraitEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
         val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
-        // Draw original sharp base
         canvas.drawBitmap(src, 0f, 0f, paint)
 
-        // Create soft blurred bloom overlay
         val scale = 0.25f
         val small = Bitmap.createScaledBitmap(src, Math.max(1, (w * scale).toInt()), Math.max(1, (h * scale).toInt()), true)
         val blurred = Bitmap.createScaledBitmap(small, w, h, true)
         small.recycle()
 
-        // Screen blend soft bloom
         paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
-        paint.alpha = 110
+        paint.alpha = (120 * intensity).toInt().coerceIn(10, 220)
         canvas.drawBitmap(blurred, 0f, 0f, paint)
         paint.xfermode = null
         paint.alpha = 255
         blurred.recycle()
 
-        // Slight warm tone matrix
         val warmMatrix = ColorMatrix(
             floatArrayOf(
                 1.08f, 0f, 0f, 0f, 8f,
                 0f, 1.02f, 0f, 0f, 4f,
                 0f, 0f, 0.95f, 0f, 0f,
-                0f, 0f, 0f, 1f, 0f
+                0f, 0f, 0.95f, 1f, 0f
             )
         )
         val finalBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -348,96 +357,207 @@ class RawDevelopmentEngine(private val context: Context) {
         return finalBmp
     }
 
-    // 3. 油絵調 (オイルペイント Oil Painting)
-    private fun applyOilPaintEffect(src: Bitmap): Bitmap {
+    // 3. 油絵調 (オイルペイント - Kuwahara Thick Brush Stroke Filter)
+    private fun applyKuwaharaOilPaintEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
         val scaledW = Math.max(1, w / 2)
         val scaledH = Math.max(1, h / 2)
         val small = Bitmap.createScaledBitmap(src, scaledW, scaledH, true)
 
-        val outputSmall = Bitmap.createBitmap(scaledW, scaledH, Bitmap.Config.ARGB_8888)
-        val canvasSmall = Canvas(outputSmall)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val radius = (3 * intensity).toInt().coerceIn(2, 7)
 
-        // Posterize color matrix to round color values into oil stroke blocks
-        val posterizeMatrix = ColorMatrix(
-            floatArrayOf(
-                1.2f, 0f, 0f, 0f, -15f,
-                0f, 1.2f, 0f, 0f, -15f,
-                0f, 0f, 1.2f, 0f, -15f,
-                0f, 0f, 0f, 1f, 0f
-            )
-        )
-        paint.colorFilter = ColorMatrixColorFilter(posterizeMatrix)
-        canvasSmall.drawBitmap(small, 0f, 0f, paint)
+        val pixels = IntArray(scaledW * scaledH)
+        small.getPixels(pixels, 0, scaledW, 0, 0, scaledW, scaledH)
+        val outPixels = IntArray(scaledW * scaledH)
+
+        for (y in radius until scaledH - radius) {
+            val rowOffset = y * scaledW
+            for (x in radius until scaledW - radius) {
+                // Evaluate 4 Kuwahara quadrants
+                var minVar = Float.MAX_VALUE
+                var bestColor = pixels[rowOffset + x]
+
+                val offsets = arrayOf(
+                    Pair(-radius..0, -radius..0),
+                    Pair(0..radius, -radius..0),
+                    Pair(-radius..0, 0..radius),
+                    Pair(0..radius, 0..radius)
+                )
+
+                for ((rRange, cRange) in offsets) {
+                    var rSum = 0L
+                    var gSum = 0L
+                    var bSum = 0L
+                    var lSum = 0L
+                    var lSqSum = 0L
+                    var count = 0
+
+                    for (dy in rRange) {
+                        val py = y + dy
+                        val pRow = py * scaledW
+                        for (dx in cRange) {
+                            val px = x + dx
+                            val c = pixels[pRow + px]
+                            val r = Color.red(c)
+                            val g = Color.green(c)
+                            val b = Color.blue(c)
+                            val l = (r * 2 + g * 5 + b) shr 3
+
+                            rSum += r
+                            gSum += g
+                            bSum += b
+                            lSum += l
+                            lSqSum += (l * l).toLong()
+                            count++
+                        }
+                    }
+
+                    if (count > 0) {
+                        val meanL = lSum.toFloat() / count
+                        val varL = (lSqSum.toFloat() / count) - (meanL * meanL)
+                        if (varL < minVar) {
+                            minVar = varL
+                            bestColor = Color.rgb(
+                                (rSum / count).toInt(),
+                                (gSum / count).toInt(),
+                                (bSum / count).toInt()
+                            )
+                        }
+                    }
+                }
+                outPixels[rowOffset + x] = bestColor
+            }
+        }
+
+        small.setPixels(outPixels, 0, scaledW, 0, 0, scaledW, scaledH)
+        val result = Bitmap.createScaledBitmap(small, w, h, true)
         small.recycle()
-
-        val result = Bitmap.createScaledBitmap(outputSmall, w, h, true)
-        outputSmall.recycle()
         return result
     }
 
-    // 4. ペン画調 (インクスケッチ Pen Sketch)
-    private fun applyPenSketchEffect(src: Bitmap): Bitmap {
+    // 4. ペン画調 (カラーインクスケッチ - Color Watercolor Ink Sketch)
+    private fun applyColorPenSketchEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
         val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
-        // Light off-white paper canvas
-        canvas.drawColor(Color.rgb(250, 248, 242))
+        // Light soft watercolor base photo
+        val watercolorMatrix = ColorMatrix()
+        watercolorMatrix.setSaturation(0.75f)
+        val contrastMatrix = ColorMatrix(
+            floatArrayOf(
+                0.85f, 0f, 0f, 0f, 35f,
+                0f, 0.85f, 0f, 0f, 35f,
+                0f, 0.0f, 0.85f, 0f, 35f,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+        watercolorMatrix.postConcat(contrastMatrix)
+        paint.colorFilter = ColorMatrixColorFilter(watercolorMatrix)
+        canvas.drawBitmap(src, 0f, 0f, paint)
 
+        // Overlay Ink Edge Lines
         val pixels = IntArray(w * h)
         src.getPixels(pixels, 0, w, 0, 0, w, h)
-        val outPixels = IntArray(w * h)
+        val lineBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val linePixels = IntArray(w * h)
 
-        val paperColor = Color.rgb(250, 248, 242)
-        val inkColor = Color.rgb(35, 30, 25)
+        val strokeThresh = (22f / intensity).coerceIn(8f, 50f)
+        val inkColor = Color.argb(230, 20, 20, 20)
 
         for (y in 1 until h - 1) {
             val offset = y * w
             for (x in 1 until w - 1) {
                 val c0 = pixels[offset + x]
-                val cRight = pixels[offset + x + 1]
-                val cDown = pixels[offset + w + x]
+                val cR = pixels[offset + x + 1]
+                val cD = pixels[offset + w + x]
 
-                val lum0 = (Color.red(c0) * 2 + Color.green(c0) * 5 + Color.blue(c0)) shr 3
-                val lumR = (Color.red(cRight) * 2 + Color.green(cRight) * 5 + Color.blue(cRight)) shr 3
-                val lumD = (Color.red(cDown) * 2 + Color.green(cDown) * 5 + Color.blue(cDown)) shr 3
+                val l0 = (Color.red(c0) * 2 + Color.green(c0) * 5 + Color.blue(c0)) shr 3
+                val lR = (Color.red(cR) * 2 + Color.green(cR) * 5 + Color.blue(cR)) shr 3
+                val lD = (Color.red(cD) * 2 + Color.green(cD) * 5 + Color.blue(cD)) shr 3
 
-                val diff = Math.abs(lum0 - lumR) + Math.abs(lum0 - lumD)
-                if (diff > 28) {
-                    outPixels[offset + x] = inkColor
+                val diff = Math.abs(l0 - lR) + Math.abs(l0 - lD)
+                if (diff > strokeThresh) {
+                    linePixels[offset + x] = inkColor
                 } else {
-                    outPixels[offset + x] = paperColor
+                    linePixels[offset + x] = Color.TRANSPARENT
                 }
             }
         }
 
-        output.setPixels(outPixels, 0, w, 0, 0, w, h)
+        lineBmp.setPixels(linePixels, 0, w, 0, 0, w, h)
+        paint.colorFilter = null
+        canvas.drawBitmap(lineBmp, 0f, 0f, paint)
+        lineBmp.recycle()
+
         return output
     }
 
-    // 5. アニメ調 (セル画風 Cel Shading)
-    private fun applyAnimeEffect(src: Bitmap): Bitmap {
+    // 5. アニメ調 (セル画風 Cel-Shaded Anime)
+    private fun applyCelShadedAnimeEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
         val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
-        // Boost saturation for anime vibrancy
-        val satMatrix = ColorMatrix()
-        satMatrix.setSaturation(1.35f)
-        paint.colorFilter = ColorMatrixColorFilter(satMatrix)
-        canvas.drawBitmap(src, 0f, 0f, paint)
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+        val outPixels = IntArray(w * h)
 
-        return output
+        val steps = 5
+        val darkLineColor = Color.rgb(20, 20, 25)
+        val thresh = (25f / intensity).coerceIn(10f, 60f)
+
+        for (y in 0 until h) {
+            val offset = y * w
+            for (x in 0 until w) {
+                val c = pixels[offset + x]
+                var r = Color.red(c)
+                var g = Color.green(c)
+                var b = Color.blue(c)
+
+                // Quantize RGB colors into discrete cel-shading bands
+                r = (Math.round(r.toFloat() / 255f * steps) * (255 / steps)).coerceIn(0, 255)
+                g = (Math.round(g.toFloat() / 255f * steps) * (255 / steps)).coerceIn(0, 255)
+                b = (Math.round(b.toFloat() / 255f * steps) * (255 / steps)).coerceIn(0, 255)
+
+                if (x > 0 && x < w - 1 && y > 0 && y < h - 1) {
+                    val cR = pixels[offset + x + 1]
+                    val cD = pixels[offset + w + x]
+                    val l0 = (Color.red(c) * 2 + Color.green(c) * 5 + Color.blue(c)) shr 3
+                    val lR = (Color.red(cR) * 2 + Color.green(cR) * 5 + Color.blue(cR)) shr 3
+                    val lD = (Color.red(cD) * 2 + Color.green(cD) * 5 + Color.blue(cD)) shr 3
+
+                    if (Math.abs(l0 - lR) + Math.abs(l0 - lD) > thresh) {
+                        outPixels[offset + x] = darkLineColor
+                        continue
+                    }
+                }
+
+                outPixels[offset + x] = Color.rgb(r, g, b)
+            }
+        }
+
+        output.setPixels(outPixels, 0, w, 0, 0, w, h)
+
+        // Boost saturation for vivid anime look
+        val finalBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val finalCanvas = Canvas(finalBmp)
+        val satMatrix = ColorMatrix()
+        satMatrix.setSaturation(1.4f)
+        paint.colorFilter = ColorMatrixColorFilter(satMatrix)
+        finalCanvas.drawBitmap(output, 0f, 0f, paint)
+        output.recycle()
+
+        return finalBmp
     }
 
     // 6. レトロフィルム (トイカメラ Lomo Vignette)
-    private fun applyRetroFilmEffect(src: Bitmap): Bitmap {
+    private fun applyRetroFilmEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
         val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -459,10 +579,11 @@ class RawDevelopmentEngine(private val context: Context) {
 
         // Radial Vignette mask on corners
         val radius = Math.hypot(w / 2.0, h / 2.0).toFloat()
+        val darkAlpha = (210 * intensity).toInt().coerceIn(50, 255)
         val vignetteShader = RadialGradient(
             w / 2f, h / 2f, radius,
-            intArrayOf(Color.TRANSPARENT, Color.TRANSPARENT, Color.argb(180, 0, 0, 0)),
-            floatArrayOf(0.0f, 0.55f, 1.0f),
+            intArrayOf(Color.TRANSPARENT, Color.TRANSPARENT, Color.argb(darkAlpha, 0, 0, 0)),
+            floatArrayOf(0.0f, 0.50f, 1.0f),
             Shader.TileMode.CLAMP
         )
         paint.shader = vignetteShader
@@ -473,7 +594,7 @@ class RawDevelopmentEngine(private val context: Context) {
     }
 
     // 7. モノクロノワール (高コントラスト白黒 Noir)
-    private fun applyNoirEffect(src: Bitmap): Bitmap {
+    private fun applyNoirEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
         val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -483,7 +604,7 @@ class RawDevelopmentEngine(private val context: Context) {
         val noirMatrix = ColorMatrix()
         noirMatrix.setSaturation(0f)
 
-        val contrast = 1.65f
+        val contrast = 1.35f + 0.35f * intensity
         val translate = 128f * (1f - contrast) - 15f
         val highContrastMatrix = ColorMatrix(
             floatArrayOf(
