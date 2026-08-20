@@ -438,7 +438,7 @@ class RawDevelopmentEngine(private val context: Context) {
         return output
     }
 
-    // 4. ペン画調 (カラーペン画 - 色味・明度変化境界にクッキリ太い黒線を突き通し＋影領域に斜め交差ハッチング描線)
+    // 4. ペン画調 (カラーペン画 - 長い流線型ペン線による斜めハッチング ＋ クッキリ太い黒輪郭線)
     private fun applyCrossHatchPenSketchEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
@@ -508,17 +508,18 @@ class RawDevelopmentEngine(private val context: Context) {
         canvas.drawBitmap(outlineBmp, 0f, 0f, paint)
         outlineBmp.recycle()
 
-        // 3. DIAGONAL PEN HATCHING STROKES (暗くなるところに斜めのペン線でハッチング)
+        // 3. LONG CONTINUOUS DIAGONAL HATCHING PEN STROKES (長めの連写ペン線でハッチング)
         val hatchPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.argb(235, 20, 20, 20)
-            strokeWidth = Math.max(1.2f, 1.9f * intensity)
+            strokeWidth = Math.max(1.3f, 2.0f * intensity)
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
         }
 
-        val spacing = Math.max(6, (12 * intensity).toInt())
+        val spacing = Math.max(7, (14 * intensity).toInt())
+        val minStrokeLen = Math.max(15, (w * 0.06f * intensity).toInt()) // Long stroke threshold!
 
-        // Pass 1: Primary Diagonal Hatching (/ direction, angle +45 deg)
+        // Pass 1: Primary Long Diagonal Hatching (/ direction, angle +45 deg)
         var diag = -h
         while (diag < w + h) {
             var x = diag
@@ -531,20 +532,26 @@ class RawDevelopmentEngine(private val context: Context) {
                     val c = pixels[y * w + x]
                     val lum = (Color.red(c) * 2 + Color.green(c) * 5 + Color.blue(c)) shr 3
 
-                    if (lum < 205) { // Shadow region needs diagonal stroke
+                    if (lum < 215) { // Broad shadow coverage
                         if (strokeStartX < 0) {
                             strokeStartX = x.toFloat()
                             strokeStartY = y.toFloat()
                         }
                     } else {
                         if (strokeStartX >= 0) {
-                            canvas.drawLine(strokeStartX, strokeStartY, x.toFloat(), y.toFloat(), hatchPaint)
+                            val len = Math.hypot((x - strokeStartX).toDouble(), (y - strokeStartY).toDouble())
+                            if (len >= minStrokeLen) {
+                                canvas.drawLine(strokeStartX, strokeStartY, x.toFloat(), y.toFloat(), hatchPaint)
+                            }
                             strokeStartX = -1f
                             strokeStartY = -1f
                         }
                     }
                 } else if (strokeStartX >= 0) {
-                    canvas.drawLine(strokeStartX, strokeStartY, (x - 1).toFloat(), (y - 1).toFloat(), hatchPaint)
+                    val len = Math.hypot((x - strokeStartX).toDouble(), (y - strokeStartY).toDouble())
+                    if (len >= minStrokeLen) {
+                        canvas.drawLine(strokeStartX, strokeStartY, (x - 1).toFloat(), (y - 1).toFloat(), hatchPaint)
+                    }
                     strokeStartX = -1f
                     strokeStartY = -1f
                 }
@@ -557,7 +564,7 @@ class RawDevelopmentEngine(private val context: Context) {
             diag += spacing
         }
 
-        // Pass 2: Secondary Intersecting Diagonal Hatching (\ direction, angle -45 deg) for deeper shadows
+        // Pass 2: Secondary Long Intersecting Diagonal Hatching (\ direction, angle -45 deg) for deeper shadows
         diag = -h
         while (diag < w + h) {
             var x = diag
@@ -570,20 +577,26 @@ class RawDevelopmentEngine(private val context: Context) {
                     val c = pixels[y * w + x]
                     val lum = (Color.red(c) * 2 + Color.green(c) * 5 + Color.blue(c)) shr 3
 
-                    if (lum < 145) { // Deeper shadow region needs cross-hatch
+                    if (lum < 150) { // Deeper shadow coverage
                         if (strokeStartX < 0) {
                             strokeStartX = x.toFloat()
                             strokeStartY = y.toFloat()
                         }
                     } else {
                         if (strokeStartX >= 0) {
-                            canvas.drawLine(strokeStartX, strokeStartY, x.toFloat(), y.toFloat(), hatchPaint)
+                            val len = Math.hypot((x - strokeStartX).toDouble(), (y - strokeStartY).toDouble())
+                            if (len >= minStrokeLen) {
+                                canvas.drawLine(strokeStartX, strokeStartY, x.toFloat(), y.toFloat(), hatchPaint)
+                            }
                             strokeStartX = -1f
                             strokeStartY = -1f
                         }
                     }
                 } else if (strokeStartX >= 0) {
-                    canvas.drawLine(strokeStartX, strokeStartY, (x - 1).toFloat(), (y + 1).toFloat(), hatchPaint)
+                    val len = Math.hypot((x - strokeStartX).toDouble(), (y - strokeStartY).toDouble())
+                    if (len >= minStrokeLen) {
+                        canvas.drawLine(strokeStartX, strokeStartY, (x - 1).toFloat(), (y + 1).toFloat(), hatchPaint)
+                    }
                     strokeStartX = -1f
                     strokeStartY = -1f
                 }
@@ -596,8 +609,8 @@ class RawDevelopmentEngine(private val context: Context) {
             diag += spacing
         }
 
-        // Pass 3: Horizontal Hatching (--- direction) for deepest shadows
-        for (y in 0 until h step (spacing * 1.2).toInt()) {
+        // Pass 3: Long Horizontal Hatching (--- direction) for deepest shadows
+        for (y in 0 until h step (spacing * 1.25).toInt()) {
             val rowOffset = y * w
             var strokeStartX = -1f
 
@@ -605,13 +618,16 @@ class RawDevelopmentEngine(private val context: Context) {
                 val c = pixels[rowOffset + x]
                 val lum = (Color.red(c) * 2 + Color.green(c) * 5 + Color.blue(c)) shr 3
 
-                if (lum < 85) { // Deep shadow
+                if (lum < 90) { // Deep shadow
                     if (strokeStartX < 0) {
                         strokeStartX = x.toFloat()
                     }
                 } else {
                     if (strokeStartX >= 0) {
-                        canvas.drawLine(strokeStartX, y.toFloat(), (x - 1).toFloat(), y.toFloat(), hatchPaint)
+                        val len = x - strokeStartX
+                        if (len >= minStrokeLen) {
+                            canvas.drawLine(strokeStartX, y.toFloat(), (x - 1).toFloat(), y.toFloat(), hatchPaint)
+                        }
                         strokeStartX = -1f
                     }
                 }

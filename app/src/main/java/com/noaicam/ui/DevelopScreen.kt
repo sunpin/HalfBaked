@@ -57,6 +57,7 @@ fun DevelopScreen(
     var developedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isRawOriginalView by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(true) }
+    var isRenderingEffect by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
@@ -97,9 +98,11 @@ fun DevelopScreen(
     // Re-render RAW bitmap when params change
     LaunchedEffect(params, originalBitmap) {
         val base = originalBitmap ?: return@LaunchedEffect
+        isRenderingEffect = true
         val rendered = rawEngine.processBitmap(base, params)
         developedBitmap = rendered
         lastRenderedParams = params
+        isRenderingEffect = false
     }
 
     Scaffold(
@@ -253,6 +256,37 @@ fun DevelopScreen(
                                         }
                                     }
                             )
+                        }
+                    }
+
+                    // Processing Overlay Indicator Pill (Top Center)
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = isRenderingEffect,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 16.dp)
+                    ) {
+                        Surface(
+                            color = DarkSurface.copy(alpha = 0.85f),
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    color = RawGold,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "現像・エフェクト処理中...",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                            }
                         }
                     }
 
