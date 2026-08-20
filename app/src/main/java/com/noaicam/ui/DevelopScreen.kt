@@ -479,6 +479,48 @@ fun DevelopScreen(
                                 )
                             }
                             1 -> {
+                                // NOISE REDUCTION (NR) TOGGLE (ON / OFF)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(text = "ノイズ除去 (NR)", fontSize = 12.sp, color = TextPrimary)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Surface(
+                                            color = if (!params.isNoiseReductionEnabled) RawGold else DarkSurfaceVariant,
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.clickable {
+                                                params = params.copy(isNoiseReductionEnabled = false)
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "OFF (自然ノイズ)",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (!params.isNoiseReductionEnabled) Color.Black else TextPrimary,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                        Surface(
+                                            color = if (params.isNoiseReductionEnabled) RawGold else DarkSurfaceVariant,
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.clickable {
+                                                params = params.copy(isNoiseReductionEnabled = true)
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "ON (ノイズ低減)",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (params.isNoiseReductionEnabled) Color.Black else TextPrimary,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+
                                 DevelopSliderControl(
                                     label = "コントラスト",
                                     valueDisplay = "%.2fx".format(params.contrast),
