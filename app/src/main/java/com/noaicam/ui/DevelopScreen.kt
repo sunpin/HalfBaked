@@ -6,6 +6,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -21,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -51,7 +53,7 @@ fun DevelopScreen(
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
     var params by remember { mutableStateOf(DevelopParams()) }
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Exposure/WB, 1: Tone/Contrast, 2: Color
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Exposure/WB, 1: Tone/Contrast, 2: Color, 3: Crop/Zoom
 
     // Load RAW image
     LaunchedEffect(dngFilePath) {
@@ -137,12 +139,25 @@ fun DevelopScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                // Photo Canvas Preview (Upper Area)
+                // Photo Canvas Preview (Upper Area with Pinch-to-Zoom & Pan Gesture Support)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1.0f)
-                        .background(Color.Black),
+                        .background(Color.Black)
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                val newScale = (params.cropScale * zoom).coerceIn(1.0f, 4.0f)
+                                val panFactor = 0.003f
+                                val newPanX = (params.cropPanX + pan.x * panFactor).coerceIn(-1.0f, 1.0f)
+                                val newPanY = (params.cropPanY + pan.y * panFactor).coerceIn(-1.0f, 1.0f)
+                                params = params.copy(
+                                    cropScale = newScale,
+                                    cropPanX = newPanX,
+                                    cropPanY = newPanY
+                                )
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     val displayBmp = if (isRawOriginalView) originalBitmap else developedBitmap
@@ -264,10 +279,11 @@ fun DevelopScreen(
                         .background(DarkSurface)
                 ) {
                     // Category Tabs
-                    TabRow(
+                    ScrollableTabRow(
                         selectedTabIndex = selectedTab,
                         containerColor = DarkSurface,
-                        contentColor = RawGold
+                        contentColor = RawGold,
+                        edgePadding = 8.dp
                     ) {
                         Tab(
                             selected = selectedTab == 0,
@@ -283,6 +299,11 @@ fun DevelopScreen(
                             selected = selectedTab == 2,
                             onClick = { selectedTab = 2 },
                             text = { Text("色彩・彩度", fontSize = 12.sp) }
+                        )
+                        Tab(
+                            selected = selectedTab == 3,
+                            onClick = { selectedTab = 3 },
+                            text = { Text("トリミング & ズーム", fontSize = 12.sp) }
                         )
                     }
 
@@ -415,6 +436,34 @@ fun DevelopScreen(
                                     valueRange = 0.0f..2.0f,
                                     onValueChange = { params = params.copy(saturation = it) },
                                     onReset = { params = params.copy(saturation = 1.0f) }
+                                )
+                            }
+                            3 -> {
+                                DevelopSliderControl(
+                                    label = "ズーム・トリミング倍率",
+                                    valueDisplay = "%.2fx".format(params.cropScale),
+                                    value = params.cropScale,
+                                    valueRange = 1.0f..4.0f,
+                                    onValueChange = { params = params.copy(cropScale = it) },
+                                    onReset = { params = params.copy(cropScale = 1.0f, cropPanX = 0f, cropPanY = 0f) }
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                DevelopSliderControl(
+                                    label = "左右位置 (Pan X)",
+                                    valueDisplay = if (params.cropPanX >= 0) "+%.2f".format(params.cropPanX) else "%.2f".format(params.cropPanX),
+                                    value = params.cropPanX,
+                                    valueRange = -1.0f..1.0f,
+                                    onValueChange = { params = params.copy(cropPanX = it) },
+                                    onReset = { params = params.copy(cropPanX = 0f) }
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                DevelopSliderControl(
+                                    label = "上下位置 (Pan Y)",
+                                    valueDisplay = if (params.cropPanY >= 0) "+%.2f".format(params.cropPanY) else "%.2f".format(params.cropPanY),
+                                    value = params.cropPanY,
+                                    valueRange = -1.0f..1.0f,
+                                    onValueChange = { params = params.copy(cropPanY = it) },
+                                    onReset = { params = params.copy(cropPanY = 0f) }
                                 )
                             }
                         }

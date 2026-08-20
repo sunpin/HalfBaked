@@ -97,6 +97,18 @@ class SettingsManager(context: Context) {
         get() = prefs.getFloat("develop_sharpness", 1.0f)
         set(value) = prefs.edit().putFloat("develop_sharpness", value).apply()
 
+    var cropScale: Float
+        get() = prefs.getFloat("develop_crop_scale", 1.0f)
+        set(value) = prefs.edit().putFloat("develop_crop_scale", value).apply()
+
+    var cropPanX: Float
+        get() = prefs.getFloat("develop_crop_pan_x", 0f)
+        set(value) = prefs.edit().putFloat("develop_crop_pan_x", value).apply()
+
+    var cropPanY: Float
+        get() = prefs.getFloat("develop_crop_pan_y", 0f)
+        set(value) = prefs.edit().putFloat("develop_crop_pan_y", value).apply()
+
     var zoomCropMode: ZoomCropMode
         get() {
             val name = prefs.getString("zoom_crop_mode", ZoomCropMode.CROP_UPSCALE.name)
@@ -120,6 +132,9 @@ class SettingsManager(context: Context) {
             whiteLevel = whiteLevel,
             saturation = saturation,
             sharpness = sharpness,
+            cropScale = cropScale,
+            cropPanX = cropPanX,
+            cropPanY = cropPanY,
             zoomCropMode = zoomCropMode
         )
     }
@@ -135,6 +150,9 @@ class SettingsManager(context: Context) {
         whiteLevel = params.whiteLevel
         saturation = params.saturation
         sharpness = params.sharpness
+        cropScale = params.cropScale
+        cropPanX = params.cropPanX
+        cropPanY = params.cropPanY
         zoomCropMode = params.zoomCropMode
     }
 }

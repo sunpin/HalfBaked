@@ -26,5 +26,8 @@ data class DevelopParams(
     val whiteLevel: Float = 0f,                // -1.0f to +1.0f (白レベル)
     val saturation: Float = 1.0f,              // 0.0f to 2.0f
     val sharpness: Float = 1.0f,               // 0.0f to 2.0f (シャープネス)
+    val cropScale: Float = 1.0f,               // 1.0f to 4.0f (ズーム倍率)
+    val cropPanX: Float = 0f,                  // -1.0f to +1.0f (左右クロップ位置)
+    val cropPanY: Float = 0f,                  // -1.0f to +1.0f (上下クロップ位置)
     val zoomCropMode: ZoomCropMode = ZoomCropMode.CROP_UPSCALE // ズーム現像モード
 )

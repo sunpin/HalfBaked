@@ -107,14 +107,25 @@ class RawDevelopmentEngine(private val context: Context) {
         zoomRatio: Float = 1.0f
     ): Bitmap =
         withContext(Dispatchers.Default) {
-            // 1. Apply Zoom Cropping / Upscaling if zoomed and enabled
-            val sourceBitmap = if (zoomRatio > 1.05f && params.zoomCropMode != ZoomCropMode.OFF) {
+            // 1. Apply Arbitrary Pan/Zoom Cropping & Upscaling for Post-Development
+            val effectiveScale = if (params.cropScale > 1.02f) params.cropScale else zoomRatio
+            val sourceBitmap = if (effectiveScale > 1.05f && params.zoomCropMode != ZoomCropMode.OFF) {
                 val origW = baseBitmap.width
                 val origH = baseBitmap.height
-                val cropW = (origW / zoomRatio).toInt().coerceIn(10, origW)
-                val cropH = (origH / zoomRatio).toInt().coerceIn(10, origH)
-                val cropX = ((origW - cropW) / 2).coerceIn(0, origW - cropW)
-                val cropY = ((origH - cropH) / 2).coerceIn(0, origH - cropH)
+                val cropW = (origW / effectiveScale).toInt().coerceIn(10, origW)
+                val cropH = (origH / effectiveScale).toInt().coerceIn(10, origH)
+
+                val maxShiftX = (origW - cropW) / 2
+                val maxShiftY = (origH - cropH) / 2
+
+                val shiftX = (params.cropPanX * maxShiftX).toInt()
+                val shiftY = (params.cropPanY * maxShiftY).toInt()
+
+                val centerX = origW / 2 + shiftX
+                val centerY = origH / 2 + shiftY
+
+                val cropX = (centerX - cropW / 2).coerceIn(0, origW - cropW)
+                val cropY = (centerY - cropH / 2).coerceIn(0, origH - cropH)
 
                 val cropped = Bitmap.createBitmap(baseBitmap, cropX, cropY, cropW, cropH)
 
