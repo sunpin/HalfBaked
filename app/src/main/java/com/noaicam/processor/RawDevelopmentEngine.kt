@@ -438,7 +438,7 @@ class RawDevelopmentEngine(private val context: Context) {
         return output
     }
 
-    // 4. ペン画調テスト (背景：真っ白, 輪郭：赤の連続線, ハッチング：青の広い平行斜めペン線)
+    // 4. ペン画調テスト (大域的マクロ解析 ＋ 物の形に沿う長尺ハッチング描画)
     private fun applyCrossHatchPenSketchEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
@@ -451,236 +451,136 @@ class RawDevelopmentEngine(private val context: Context) {
         val pixels = IntArray(w * h)
         src.getPixels(pixels, 0, w, 0, 0, w, h)
 
-        // A. 3x3 Smoothing to suppress noise and smooth gradients
-        val lum = IntArray(w * h)
-        val sat = FloatArray(w * h)
+        // 大域グリッドサイズ (18px ~ 36px の大きなブロック単位で大域解析)
+        val step = Math.max(18, (34 * intensity).toInt())
+        val gridW = (w + step - 1) / step
+        val gridH = (h + step - 1) / step
+
+        val macroLum = IntArray(gridW * gridH)
+        val macroSat = FloatArray(gridW * gridH)
         val hsv = FloatArray(3)
 
-        for (i in pixels.indices) {
-            val c = pixels[i]
-            val r = Color.red(c)
-            val g = Color.green(c)
-            val b = Color.blue(c)
-            lum[i] = (r * 2 + g * 5 + b) shr 3
+        // 大域ブロック平均の計算
+        for (gy in 0 until gridH) {
+            val startY = gy * step
+            val endY = Math.min(startY + step, h)
+            val rowOffset = gy * gridW
 
-            Color.colorToHSV(c, hsv)
-            sat[i] = hsv[1]
-        }
+            for (gx in 0 until gridW) {
+                val startX = gx * step
+                val endX = Math.min(startX + step, w)
 
-        val smoothLum = IntArray(w * h)
-        val smoothSat = FloatArray(w * h)
-
-        for (y in 1 until h - 1) {
-            val rowOffset = y * w
-            for (x in 1 until w - 1) {
                 var sumL = 0
                 var sumS = 0f
-                for (dy in -1..1) {
-                    val off = (y + dy) * w
-                    for (dx in -1..1) {
-                        val idx = off + x + dx
-                        sumL += lum[idx]
-                        sumS += sat[idx]
+                var count = 0
+
+                for (y in startY until endY) {
+                    val pRow = y * w
+                    for (x in startX until endX) {
+                        val c = pixels[pRow + x]
+                        val l = (Color.red(c) * 2 + Color.green(c) * 5 + Color.blue(c)) shr 3
+                        sumL += l
+
+                        Color.colorToHSV(c, hsv)
+                        sumS += hsv[1]
+                        count++
                     }
                 }
-                smoothLum[rowOffset + x] = sumL / 9
-                smoothSat[rowOffset + x] = sumS / 9f
+
+                if (count > 0) {
+                    macroLum[rowOffset + gx] = sumL / count
+                    macroSat[rowOffset + gx] = sumS / count
+                }
             }
         }
 
-        // B. SOBEL EDGE DETECTION for Sharp Step Changes (Ignored smooth gradients & noise)
+        // A. 大域的な太い赤の輪郭線 (赤線 / RED)
         val outlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.RED
-            strokeWidth = Math.max(2.0f, 3.5f * intensity)
+            strokeWidth = Math.max(3.2f, 5.5f * intensity)
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
         }
 
-        val edgeThresh = (35f / intensity).coerceIn(15f, 70f) // Threshold for step changes
+        val macroEdgeThresh = (25f / intensity).coerceIn(12f, 60f)
 
-        // Horizontal scanline outline stroke connection
-        for (y in 2 until h - 2 step 2) {
-            val rowOffset = y * w
-            var startX = -1f
-            for (x in 2 until w - 2) {
-                val idx = rowOffset + x
+        for (gy in 1 until gridH - 1) {
+            val rowOff = gy * gridW
+            for (gx in 1 until gridW - 1) {
+                val idx = rowOff + gx
 
-                val gxL = (-smoothLum[idx - w - 1] + smoothLum[idx - w + 1]
-                        - 2 * smoothLum[idx - 1] + 2 * smoothLum[idx + 1]
-                        - smoothLum[idx + w - 1] + smoothLum[idx + w + 1])
-
-                val gyL = (-smoothLum[idx - w - 1] - 2 * smoothLum[idx - w] - smoothLum[idx - w + 1]
-                        + smoothLum[idx + w - 1] + 2 * smoothLum[idx + w] + smoothLum[idx + w + 1])
-
+                val gxL = (macroLum[idx + 1] - macroLum[idx - 1]).toFloat()
+                val gyL = (macroLum[idx + gridW] - macroLum[idx - gridW]).toFloat()
                 val magL = Math.hypot(gxL.toDouble(), gyL.toDouble()).toFloat()
 
-                val gxS = (-smoothSat[idx - w - 1] + smoothSat[idx - w + 1]
-                        - 2 * smoothSat[idx - 1] + 2 * smoothSat[idx + 1]
-                        - smoothSat[idx + w - 1] + smoothSat[idx + w + 1]) * 255f
-
-                val gyS = (-smoothSat[idx - w - 1] - 2 * smoothSat[idx - w] - smoothSat[idx - w + 1]
-                        + smoothSat[idx + w - 1] + 2 * smoothSat[idx + w] + smoothSat[idx + w + 1]) * 255f
-
+                val gxS = (macroSat[idx + 1] - macroSat[idx - 1]) * 255f
+                val gyS = (macroSat[idx + gridW] - macroSat[idx - gridW]) * 255f
                 val magS = Math.hypot(gxS.toDouble(), gyS.toDouble()).toFloat()
 
                 val totalMag = Math.max(magL, magS)
 
-                if (totalMag > edgeThresh) {
-                    if (startX < 0) startX = x.toFloat()
-                } else {
-                    if (startX >= 0) {
-                        canvas.drawLine(startX, y.toFloat(), (x - 1).toFloat(), y.toFloat(), outlinePaint)
-                        startX = -1f
-                    }
+                if (totalMag > macroEdgeThresh) {
+                    val cx = (gx + 0.5f) * step
+                    val cy = (gy + 0.5f) * step
+
+                    // 勾配と垂直な方向（＝物体の輪郭方向）に太い輪郭線を引く
+                    val contourAngle = Math.atan2(gyL.toDouble(), gxL.toDouble()).toFloat() + (Math.PI / 2).toFloat()
+                    val lineLen = step * 1.5f
+                    val dx = (Math.cos(contourAngle.toDouble()) * lineLen / 2).toFloat()
+                    val dy = (Math.sin(contourAngle.toDouble()) * lineLen / 2).toFloat()
+
+                    canvas.drawLine(cx - dx, cy - dy, cx + dx, cy + dy, outlinePaint)
                 }
-            }
-            if (startX >= 0) {
-                canvas.drawLine(startX, y.toFloat(), (w - 3).toFloat(), y.toFloat(), outlinePaint)
             }
         }
 
-        // Vertical scanline outline stroke connection
-        for (x in 2 until w - 2 step 2) {
-            var startY = -1f
-            for (y in 2 until h - 2) {
-                val idx = y * w + x
-
-                val gxL = (-smoothLum[idx - w - 1] + smoothLum[idx - w + 1]
-                        - 2 * smoothLum[idx - 1] + 2 * smoothLum[idx + 1]
-                        - smoothLum[idx + w - 1] + smoothLum[idx + w + 1])
-
-                val gyL = (-smoothLum[idx - w - 1] - 2 * smoothLum[idx - w] - smoothLum[idx - w + 1]
-                        + smoothLum[idx + w - 1] + 2 * smoothLum[idx + w] + smoothLum[idx + w + 1])
-
-                val magL = Math.hypot(gxL.toDouble(), gyL.toDouble()).toFloat()
-
-                val gxS = (-smoothSat[idx - w - 1] + smoothSat[idx - w + 1]
-                        - 2 * smoothSat[idx - 1] + 2 * smoothSat[idx + 1]
-                        - smoothSat[idx + w - 1] + smoothSat[idx + w + 1]) * 255f
-
-                val gyS = (-smoothSat[idx - w - 1] - 2 * smoothSat[idx - w] - smoothSat[idx - w + 1]
-                        + smoothSat[idx + w - 1] + 2 * smoothSat[idx + w] + smoothSat[idx + w + 1]) * 255f
-
-                val magS = Math.hypot(gxS.toDouble(), gyS.toDouble()).toFloat()
-
-                val totalMag = Math.max(magL, magS)
-
-                if (totalMag > edgeThresh) {
-                    if (startY < 0) startY = y.toFloat()
-                } else {
-                    if (startY >= 0) {
-                        canvas.drawLine(x.toFloat(), startY, x.toFloat(), (y - 1).toFloat(), outlinePaint)
-                        startY = -1f
-                    }
-                }
-            }
-            if (startY >= 0) {
-                canvas.drawLine(x.toFloat(), startY, x.toFloat(), (h - 3).toFloat(), outlinePaint)
-            }
-        }
-
-        // C. CLEAN LONG DIAGONAL HATCHING (CLEARLY SPACED PARALLEL PEN LINES IN BLUE)
+        // B. 物の形を意識した長尺ハッチング (青線 / BLUE)
         val hatchPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLUE
-            strokeWidth = Math.max(1.8f, 2.8f * intensity)
+            strokeWidth = Math.max(2.0f, 3.2f * intensity)
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
         }
 
-        // Wide line spacing so hatching lines are clearly separated (no dot mesh!)
-        val spacing = Math.max(14, (26 * intensity).toInt())
-        val minStrokeLen = Math.max(25, (w * 0.08f * intensity).toInt())
+        val strokeLen = step * 2.8f // 長く流れるストローク
 
-        // Pass 1: Primary Diagonal Hatching (/ direction, angle +45 deg)
-        var diag = -h
-        while (diag < w + h) {
-            var x = diag
-            var y = 0
-            var strokeStartX = -1f
-            var strokeStartY = -1f
+        for (gy in 0 until gridH) {
+            val rowOff = gy * gridW
+            for (gx in 0 until gridW) {
+                val idx = rowOff + gx
+                val l = macroLum[idx]
 
-            while (y < h) {
-                if (x in 0 until w) {
-                    val l = smoothLum[y * w + x]
-                    if (l < 210) { // Shadow region
-                        if (strokeStartX < 0) {
-                            strokeStartX = x.toFloat()
-                            strokeStartY = y.toFloat()
-                        }
+                if (l < 215) { // 陰影領域
+                    val cx = (gx + 0.5f) * step
+                    val cy = (gy + 0.5f) * step
+
+                    // 近傍の大域勾配から「物体の面の曲がり（輪郭方向）」を計算
+                    val gxL = if (gx > 0 && gx < gridW - 1) (macroLum[idx + 1] - macroLum[idx - 1]).toFloat() else 0f
+                    val gyL = if (gy > 0 && gy < gridH - 1) (macroLum[idx + gridW] - macroLum[idx - gridW]).toFloat() else 0f
+                    val mag = Math.hypot(gxL.toDouble(), gyL.toDouble()).toFloat()
+
+                    // 物体の面の流れに沿う角度 (Form-following angle)
+                    val baseAngle = if (mag > 15f) {
+                        Math.atan2(gyL.toDouble(), gxL.toDouble()).toFloat() + (Math.PI / 2).toFloat()
                     } else {
-                        if (strokeStartX >= 0) {
-                            val len = Math.hypot((x - strokeStartX).toDouble(), (y - strokeStartY).toDouble())
-                            if (len >= minStrokeLen) {
-                                canvas.drawLine(strokeStartX, strokeStartY, x.toFloat(), y.toFloat(), hatchPaint)
-                            }
-                            strokeStartX = -1f
-                            strokeStartY = -1f
-                        }
+                        (Math.PI / 4).toFloat() // 平坦な影は45°
                     }
-                } else if (strokeStartX >= 0) {
-                    val len = Math.hypot((x - strokeStartX).toDouble(), (y - strokeStartY).toDouble())
-                    if (len >= minStrokeLen) {
-                        canvas.drawLine(strokeStartX, strokeStartY, (x - 1).toFloat(), (y - 1).toFloat(), hatchPaint)
-                    }
-                    strokeStartX = -1f
-                    strokeStartY = -1f
-                }
-                x += 1
-                y += 1
-            }
-            if (strokeStartX >= 0) {
-                val len = Math.hypot((x - strokeStartX).toDouble(), (y - strokeStartY).toDouble())
-                if (len >= minStrokeLen) {
-                    canvas.drawLine(strokeStartX, strokeStartY, (x - 1).toFloat(), (y - 1).toFloat(), hatchPaint)
-                }
-            }
-            diag += spacing
-        }
 
-        // Pass 2: Secondary Intersecting Diagonal Hatching (\ direction, angle -45 deg)
-        diag = -h
-        while (diag < w + h) {
-            var x = diag
-            var y = h - 1
-            var strokeStartX = -1f
-            var strokeStartY = -1f
+                    val dx = (Math.cos(baseAngle.toDouble()) * strokeLen / 2).toFloat()
+                    val dy = (Math.sin(baseAngle.toDouble()) * strokeLen / 2).toFloat()
 
-            while (y >= 0) {
-                if (x in 0 until w) {
-                    val l = smoothLum[y * w + x]
-                    if (l < 140) { // Deeper shadow region
-                        if (strokeStartX < 0) {
-                            strokeStartX = x.toFloat()
-                            strokeStartY = y.toFloat()
-                        }
-                    } else {
-                        if (strokeStartX >= 0) {
-                            val len = Math.hypot((x - strokeStartX).toDouble(), (y - strokeStartY).toDouble())
-                            if (len >= minStrokeLen) {
-                                canvas.drawLine(strokeStartX, strokeStartY, x.toFloat(), y.toFloat(), hatchPaint)
-                            }
-                            strokeStartX = -1f
-                            strokeStartY = -1f
-                        }
+                    // 主ハッチング（物の形に沿う青線）
+                    canvas.drawLine(cx - dx, cy - dy, cx + dx, cy + dy, hatchPaint)
+
+                    // より濃い陰影 (L < 135) には交差ハッチング
+                    if (l < 135) {
+                        val crossAngle = baseAngle + (Math.PI / 3).toFloat()
+                        val cdx = (Math.cos(crossAngle.toDouble()) * strokeLen / 2).toFloat()
+                        val cdy = (Math.sin(crossAngle.toDouble()) * strokeLen / 2).toFloat()
+                        canvas.drawLine(cx - cdx, cy - cdy, cx + cdx, cy + cdy, hatchPaint)
                     }
-                } else if (strokeStartX >= 0) {
-                    val len = Math.hypot((x - strokeStartX).toDouble(), (y - strokeStartY).toDouble())
-                    if (len >= minStrokeLen) {
-                        canvas.drawLine(strokeStartX, strokeStartY, (x - 1).toFloat(), (y + 1).toFloat(), hatchPaint)
-                    }
-                    strokeStartX = -1f
-                    strokeStartY = -1f
-                }
-                x += 1
-                y -= 1
-            }
-            if (strokeStartX >= 0) {
-                val len = Math.hypot((x - strokeStartX).toDouble(), (y - strokeStartY).toDouble())
-                if (len >= minStrokeLen) {
-                    canvas.drawLine(strokeStartX, strokeStartY, (x - 1).toFloat(), (y + 1).toFloat(), hatchPaint)
                 }
             }
-            diag += spacing
         }
 
         return output
