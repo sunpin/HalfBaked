@@ -692,7 +692,7 @@ class Camera2RawManager(private val context: Context) {
         }
     }
 
-    fun takeRawPhoto() {
+    fun takeRawPhoto(isNoiseReductionEnabled: Boolean = false) {
         val device = cameraDevice ?: return
         val session = captureSession ?: return
         val characteristics = cameraCharacteristics ?: return
@@ -704,6 +704,13 @@ class Camera2RawManager(private val context: Context) {
             applyExposureControl(captureBuilder)
             applyFlashControl(captureBuilder, isStillCapture = true)
             applyZoom(captureBuilder)
+
+            // Hardware Noise Reduction Mode Switch (ON: HIGH_QUALITY, OFF: NOISE_REDUCTION_MODE_OFF)
+            if (isNoiseReductionEnabled) {
+                captureBuilder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
+            } else {
+                captureBuilder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
+            }
 
             // Preserve active tap-to-focus metering region for still photo capture!
             if (!isFixedFocusLens && activeMeteringRegion != null) {
@@ -731,7 +738,6 @@ class Camera2RawManager(private val context: Context) {
             }
 
             captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
-            captureBuilder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
             captureBuilder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
             captureBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
             captureBuilder.set(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_DISABLED)

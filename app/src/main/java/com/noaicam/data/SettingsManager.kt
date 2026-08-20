@@ -61,6 +61,10 @@ class SettingsManager(context: Context) {
         get() = prefs.getBoolean("develop_wb_auto", true)
         set(value) = prefs.edit().putBoolean("develop_wb_auto", value).apply()
 
+    var isNoiseReductionEnabled: Boolean
+        get() = prefs.getBoolean("develop_noise_reduction", false)
+        set(value) = prefs.edit().putBoolean("develop_noise_reduction", value).apply()
+
     var exposure: Float
         get() = prefs.getFloat("develop_exposure", 0f)
         set(value) = prefs.edit().putFloat("develop_exposure", value).apply()
@@ -107,6 +111,7 @@ class SettingsManager(context: Context) {
     fun getDevelopParams(): DevelopParams {
         return DevelopParams(
             isWbAuto = isWbAuto,
+            isNoiseReductionEnabled = isNoiseReductionEnabled,
             exposure = exposure,
             temperature = temperature,
             tint = tint,
@@ -121,6 +126,7 @@ class SettingsManager(context: Context) {
 
     fun saveDevelopParams(params: DevelopParams) {
         isWbAuto = params.isWbAuto
+        isNoiseReductionEnabled = params.isNoiseReductionEnabled
         exposure = params.exposure
         temperature = params.temperature
         tint = params.tint

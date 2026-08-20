@@ -938,6 +938,51 @@ fun CameraScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    // NOISE REDUCTION (NR) TOGGLE (ON / OFF)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "ノイズ除去 (NR)", fontSize = 12.sp, color = TextPrimary)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(
+                                color = if (!developParams.isNoiseReductionEnabled) RawGold else DarkSurfaceVariant,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    developParams = developParams.copy(isNoiseReductionEnabled = false)
+                                    settingsManager.saveDevelopParams(developParams)
+                                }
+                            ) {
+                                Text(
+                                    text = "OFF (RAW自然ノイズ)",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (!developParams.isNoiseReductionEnabled) Color.Black else TextPrimary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                            Surface(
+                                color = if (developParams.isNoiseReductionEnabled) RawGold else DarkSurfaceVariant,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    developParams = developParams.copy(isNoiseReductionEnabled = true)
+                                    settingsManager.saveDevelopParams(developParams)
+                                }
+                            ) {
+                                Text(
+                                    text = "ON (ノイズ低減)",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (developParams.isNoiseReductionEnabled) Color.Black else TextPrimary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     // Sliders with Individual Parameter Resets & WB Auto Mode
                     SliderControl(
                         label = "露出補正 (EV)",
@@ -1195,7 +1240,7 @@ fun CameraScreen(
                         isCapturing = true
                         captureProgress = 0.05f
                         captureStatusText = "撮影リクエスト開始..."
-                        cameraManager.takeRawPhoto()
+                        cameraManager.takeRawPhoto(developParams.isNoiseReductionEnabled)
                     },
                 contentAlignment = Alignment.Center
             ) {

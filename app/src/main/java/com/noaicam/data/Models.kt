@@ -16,14 +16,15 @@ data class RawImageData(
 )
 
 data class DevelopParams(
-    val isWbAuto: Boolean = true,      // ホワイトバランス AUTOモード
-    val exposure: Float = 0f,          // -3.0f to +3.0f EV
-    val temperature: Float = 5500f,    // 2000K to 10000K
-    val tint: Float = 0f,              // -100f to +100f
-    val contrast: Float = 1.0f,        // 0.5f to 2.0f
-    val blackLevel: Float = 0f,        // -1.0f to +1.0f (黒レベル)
-    val whiteLevel: Float = 0f,        // -1.0f to +1.0f (白レベル)
-    val saturation: Float = 1.0f,      // 0.0f to 2.0f
-    val sharpness: Float = 1.0f,       // 0.0f to 2.0f (シャープネス)
+    val isWbAuto: Boolean = true,              // ホワイトバランス AUTOモード
+    val isNoiseReductionEnabled: Boolean = false, // ノイズ除去 (NR) ON/OFF
+    val exposure: Float = 0f,                  // -3.0f to +3.0f EV
+    val temperature: Float = 5500f,            // 2000K to 10000K
+    val tint: Float = 0f,                      // -100f to +100f
+    val contrast: Float = 1.0f,                // 0.5f to 2.0f
+    val blackLevel: Float = 0f,                // -1.0f to +1.0f (黒レベル)
+    val whiteLevel: Float = 0f,                // -1.0f to +1.0f (白レベル)
+    val saturation: Float = 1.0f,              // 0.0f to 2.0f
+    val sharpness: Float = 1.0f,               // 0.0f to 2.0f (シャープネス)
     val zoomCropMode: ZoomCropMode = ZoomCropMode.CROP_UPSCALE // ズーム現像モード
 )

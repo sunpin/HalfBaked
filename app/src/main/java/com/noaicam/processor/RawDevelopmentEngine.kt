@@ -192,13 +192,39 @@ class RawDevelopmentEngine(private val context: Context) {
             paint.colorFilter = ColorMatrixColorFilter(matrix)
             canvas.drawBitmap(sourceBitmap, 0f, 0f, paint)
 
-            // 7. Sharpness (Convolution sharpening if > 1.05)
-            if (params.sharpness > 1.05f) {
-                applySharpeningFilter(resultBitmap, params.sharpness)
+            // 7. Noise Reduction Filter (if ON)
+            val nrBitmap = if (params.isNoiseReductionEnabled) {
+                applyNoiseReductionFilter(resultBitmap)
             } else {
                 resultBitmap
             }
+
+            // 8. Sharpness (Convolution sharpening if > 1.05)
+            if (params.sharpness > 1.05f) {
+                applySharpeningFilter(nrBitmap, params.sharpness)
+            } else {
+                nrBitmap
+            }
         }
+
+    private fun applyNoiseReductionFilter(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val scaledW = Math.max(1, w / 2)
+        val scaledH = Math.max(1, h / 2)
+        val downscaled = Bitmap.createScaledBitmap(src, scaledW, scaledH, true)
+        val smooth = Bitmap.createScaledBitmap(downscaled, w, h, true)
+        downscaled.recycle()
+
+        val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        canvas.drawBitmap(src, 0f, 0f, paint)
+        paint.alpha = 140
+        canvas.drawBitmap(smooth, 0f, 0f, paint)
+        smooth.recycle()
+        return output
+    }
 
     private fun applySharpeningFilter(src: Bitmap, sharpness: Float): Bitmap {
         val amount = (sharpness - 1.0f) * 0.75f
