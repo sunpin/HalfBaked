@@ -357,7 +357,7 @@ class RawDevelopmentEngine(private val context: Context) {
         return finalBmp
     }
 
-    // 3. 油絵調 (オイルペイント - 甘め色判定で近傍の同系色を連続した油絵具線として繋ぐ)
+    // 3. 油絵調 (オイルペイント - 画面全体の色をクラスタ分け＋同じ色の領域を筆で塗る)
     private fun applyImpastoOilPaintEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
@@ -367,84 +367,78 @@ class RawDevelopmentEngine(private val context: Context) {
         // Draw canvas base
         canvas.drawColor(Color.rgb(240, 238, 230))
 
-        val step = Math.max(10, (24 * intensity).toInt())
-        val strokeWidth = step * 1.4f
-        val colorTolerance = 140 // Generous / Tolerant color similarity threshold (甘めの色判定)
-
+        // 1. Screen-wide Color Clustering (画面全体の色をクラスタ分け)
+        val numClusters = 6
         val pixels = IntArray(w * h)
         src.getPixels(pixels, 0, w, 0, 0, w, h)
-        val visited = BooleanArray(w * h)
+        val clusteredPixels = IntArray(w * h)
+
+        for (i in pixels.indices) {
+            val c = pixels[i]
+            var r = Color.red(c)
+            var g = Color.green(c)
+            var b = Color.blue(c)
+
+            r = (Math.round(r.toFloat() / 255f * numClusters) * (255 / numClusters)).coerceIn(0, 255)
+            g = (Math.round(g.toFloat() / 255f * numClusters) * (255 / numClusters)).coerceIn(0, 255)
+            b = (Math.round(b.toFloat() / 255f * numClusters) * (255 / numClusters)).coerceIn(0, 255)
+
+            clusteredPixels[i] = Color.rgb(r, g, b)
+        }
+
+        // 2. Region Paint with Brush (同じ色の領域を太い筆で塗る)
+        val step = Math.max(10, (24 * intensity).toInt())
+        val strokeWidth = step * 1.5f
+        val strokeLen = step * 2.6f
 
         val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             strokeCap = Paint.Cap.ROUND
             style = Paint.Style.STROKE
         }
 
-        val stepStep = Math.max(5, (step * 0.6f).toInt())
+        val stepStep = Math.max(5, (step * 0.65f).toInt())
 
         for (y in step / 2 until h step stepStep) {
             val rowOffset = y * w
             for (x in step / 2 until w step stepStep) {
                 val offset = rowOffset + x
-                if (offset >= pixels.size || visited[offset]) continue
+                if (offset >= clusteredPixels.size) continue
 
-                val baseC = pixels[offset]
-                val baseR = Color.red(baseC)
-                val baseG = Color.green(baseC)
-                val baseB = Color.blue(baseC)
+                val clusterColor = clusteredPixels[offset]
 
-                // Trace neighboring pixels that have similar colors (within tolerant threshold) to form a connected stroke
-                val startX = x.toFloat()
-                val startY = y.toFloat()
-                var endX = x.toFloat()
-                var endY = y.toFloat()
+                // Calculate gradient direction to lay down brush strokes following region contours
+                val x1 = Math.min(x + 3, w - 1)
+                val y1 = Math.min(y + 3, h - 1)
+                val c0 = clusteredPixels[offset]
+                val cR = clusteredPixels[rowOffset + x1]
+                val cD = clusteredPixels[y1 * w + x]
 
-                // Direction scan: check horizontal/diagonal neighbors
-                val maxLen = (step * 3.5f).toInt()
-                var len = 0
-                var currX = x
-                var currY = y
+                val l0 = (Color.red(c0) * 2 + Color.green(c0) * 5 + Color.blue(c0)) shr 3
+                val lR = (Color.red(cR) * 2 + Color.green(cR) * 5 + Color.blue(cR)) shr 3
+                val lD = (Color.red(cD) * 2 + Color.green(cD) * 5 + Color.blue(cD)) shr 3
 
-                while (len < maxLen && currX < w - 1 && currY < h - 1) {
-                    val nextOffset = currY * w + currX
-                    visited[nextOffset] = true
-                    val nextC = pixels[nextOffset]
-                    val diff = Math.abs(Color.red(nextC) - baseR) +
-                            Math.abs(Color.green(nextC) - baseG) +
-                            Math.abs(Color.blue(nextC) - baseB)
+                val gx = (lR - l0).toFloat()
+                val gy = (lD - l0).toFloat()
+                val angle = Math.atan2(gy.toDouble(), gx.toDouble()).toFloat() + (Math.PI / 2).toFloat()
 
-                    if (diff > colorTolerance) break // Exceeds generous color tolerance
+                val dx = (Math.cos(angle.toDouble()) * strokeLen / 2).toFloat()
+                val dy = (Math.sin(angle.toDouble()) * strokeLen / 2).toFloat()
 
-                    endX = currX.toFloat()
-                    endY = currY.toFloat()
-
-                    // Step towards neighbor with closest color match
-                    val rightDiff = Math.abs(Color.red(pixels[currY * w + Math.min(currX + 1, w - 1)]) - baseR)
-                    val downDiff = Math.abs(Color.red(pixels[Math.min(currY + 1, h - 1) * w + currX]) - baseR)
-
-                    if (rightDiff < downDiff) {
-                        currX += 2
-                    } else {
-                        currY += 2
-                    }
-                    len += 2
-                }
-
-                // Draw connected brush stroke connecting color-similar neighbors
-                strokePaint.color = Color.rgb(baseR, baseG, baseB)
+                // Paint the clustered color region with overlapping oil brush strokes
+                strokePaint.color = clusterColor
                 strokePaint.strokeWidth = strokeWidth
-                canvas.drawLine(startX, startY, endX + step * 0.5f, endY + step * 0.5f, strokePaint)
+                canvas.drawLine(x - dx, y - dy, x + dx, y + dy, strokePaint)
 
-                // Impasto highlight sheen on stroke
-                strokePaint.color = Color.argb(45, 255, 255, 255)
-                strokePaint.strokeWidth = strokeWidth * 0.25f
-                canvas.drawLine(startX - 2f, startY - 2f, endX + step * 0.5f - 2f, endY + step * 0.5f - 2f, strokePaint)
+                // Subtle impasto highlight sheen on stroke
+                strokePaint.color = Color.argb(40, 255, 255, 255)
+                strokePaint.strokeWidth = strokeWidth * 0.22f
+                canvas.drawLine(x - dx - 2f, y - dy - 2f, x + dx - 2f, y + dy - 2f, strokePaint)
             }
         }
         return output
     }
 
-    // 4. ペン画調 (カラーペン画 - HUE/SATをそのまま保持＋ぼかした色下地にクロスハッチで明度(VALUE)を表現)
+    // 4. ペン画調 (カラーペン画 - 純黒ペン色(Black)で下地の上に明度(クロスハッチ)と輪郭を描く)
     private fun applyCrossHatchPenSketchEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
@@ -452,7 +446,7 @@ class RawDevelopmentEngine(private val context: Context) {
         val canvas = Canvas(output)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
-        // 1. Create Base Image: Preserve exact HUE & SATURATION, but set constant high Value/Luminance for soft color wash
+        // 1. Soft blurred color wash base preserving original HUE & SATURATION
         val pixels = IntArray(w * h)
         src.getPixels(pixels, 0, w, 0, 0, w, h)
         val basePixels = IntArray(w * h)
@@ -461,15 +455,13 @@ class RawDevelopmentEngine(private val context: Context) {
         for (i in pixels.indices) {
             val c = pixels[i]
             Color.colorToHSV(c, hsv)
-            // Keep Hue (hsv[0]) and Saturation (hsv[1]), set Value (hsv[2]) to high uniform 0.88f for soft watercolor base
-            hsv[2] = 0.88f
+            hsv[2] = 0.88f // High uniform Value for soft watercolor wash
             basePixels[i] = Color.HSVToColor(hsv)
         }
 
         val baseBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         baseBmp.setPixels(basePixels, 0, w, 0, 0, w, h)
 
-        // Soft blur the Hue/Sat color wash base
         val scale = 0.5f
         val small = Bitmap.createScaledBitmap(baseBmp, Math.max(1, (w * scale).toInt()), Math.max(1, (h * scale).toInt()), true)
         val blurredBase = Bitmap.createScaledBitmap(small, w, h, true)
@@ -479,14 +471,15 @@ class RawDevelopmentEngine(private val context: Context) {
         canvas.drawBitmap(blurredBase, 0f, 0f, paint)
         blurredBase.recycle()
 
-        // 2. Cross-Hatching Overlay: Express Luminance (明度) purely via pen cross-hatch lines
+        // 2. Pure Black Ink Pen (`Color.BLACK`) for Outlines and Cross-Hatch Value Shading
         val step = Math.max(6, (12 * intensity).toInt())
-        val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(230, 25, 22, 20)
-            strokeWidth = Math.max(1.2f, 1.8f * intensity)
+        val blackPenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            strokeWidth = Math.max(1.3f, 2.0f * intensity)
             style = Paint.Style.STROKE
         }
 
+        // A. Cross-Hatching for Value / Luminance Shading
         for (y in 0 until h step step) {
             for (x in 0 until w step step) {
                 var sumLum = 0
@@ -513,22 +506,43 @@ class RawDevelopmentEngine(private val context: Context) {
                     val x1 = (x + step).toFloat()
                     val y1 = (y + step).toFloat()
 
-                    // Cross Hatching Level 1: Light Shadow (Diagonal ///)
                     if (avgLum < 205) {
-                        canvas.drawLine(x0, y1, x1, y0, strokePaint)
+                        canvas.drawLine(x0, y1, x1, y0, blackPenPaint)
                     }
-                    // Cross Hatching Level 2: Medium Shadow (Cross Hatch XXX)
                     if (avgLum < 145) {
-                        canvas.drawLine(x0, y0, x1, y1, strokePaint)
+                        canvas.drawLine(x0, y0, x1, y1, blackPenPaint)
                     }
-                    // Cross Hatching Level 3: Deep Shadow (Horizontal lines)
                     if (avgLum < 90) {
-                        canvas.drawLine(x0, y0 + step / 2f, x1, y0 + step / 2f, strokePaint)
+                        canvas.drawLine(x0, y0 + step / 2f, x1, y0 + step / 2f, blackPenPaint)
                     }
-                    // Cross Hatching Level 4: Dense Shadow (Vertical lines)
                     if (avgLum < 45) {
-                        canvas.drawLine(x0 + step / 2f, y0, x0 + step / 2f, y1, strokePaint)
+                        canvas.drawLine(x0 + step / 2f, y0, x0 + step / 2f, y1, blackPenPaint)
                     }
+                }
+            }
+        }
+
+        // B. Pure Black Ink Contour Outlines (輪郭)
+        val thresh = (20f / intensity).coerceIn(8f, 45f)
+        val outlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            strokeWidth = Math.max(1.5f, 2.2f * intensity)
+            style = Paint.Style.STROKE
+        }
+
+        for (y in 1 until h - 1 step 2) {
+            val offset = y * w
+            for (x in 1 until w - 1 step 2) {
+                val c0 = pixels[offset + x]
+                val cR = pixels[offset + x + 1]
+                val cD = pixels[offset + w + x]
+
+                val l0 = (Color.red(c0) * 2 + Color.green(c0) * 5 + Color.blue(c0)) shr 3
+                val lR = (Color.red(cR) * 2 + Color.green(cR) * 5 + Color.blue(cR)) shr 3
+                val lD = (Color.red(cD) * 2 + Color.green(cD) * 5 + Color.blue(cD)) shr 3
+
+                if (Math.abs(l0 - lR) + Math.abs(l0 - lD) > thresh) {
+                    canvas.drawPoint(x.toFloat(), y.toFloat(), outlinePaint)
                 }
             }
         }
