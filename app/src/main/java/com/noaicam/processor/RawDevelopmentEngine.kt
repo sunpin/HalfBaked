@@ -357,21 +357,22 @@ class RawDevelopmentEngine(private val context: Context) {
         return finalBmp
     }
 
-    // 3. 油絵調 (オイルペイント - Real Impasto Contour Brush Strokes: 元の色から上から筆で描く)
+    // 3. 油絵調 (オイルペイント - 超極太筆 ＋ 色の整理パレット)
     private fun applyImpastoOilPaintEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
         val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
 
-        // Draw original base background
-        val basePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        canvas.drawBitmap(src, 0f, 0f, basePaint)
+        // Draw light canvas background
+        canvas.drawColor(Color.rgb(240, 238, 230))
 
-        val step = Math.max(5, (14 * intensity).toInt())
-        val strokeLen = step * 2.2f
-        val strokeWidth = step * 1.1f
+        // Super large brush stroke size (極太筆)
+        val step = Math.max(12, (28 * intensity).toInt())
+        val strokeLen = step * 2.8f
+        val strokeWidth = step * 1.5f
 
+        val colorQuantSteps = 6 // Quantize palette into 6 distinct bold oil paint colors (色の整理)
         val pixels = IntArray(w * h)
         src.getPixels(pixels, 0, w, 0, 0, w, h)
 
@@ -380,21 +381,26 @@ class RawDevelopmentEngine(private val context: Context) {
             style = Paint.Style.STROKE
         }
 
-        // Draw overlapping thick oil paint brush strokes along local edge contours
-        val stepStep = Math.max(3, (step * 0.7f).toInt())
+        val stepStep = Math.max(6, (step * 0.65f).toInt())
         for (y in step / 2 until h step stepStep) {
             val rowOffset = y * w
             for (x in step / 2 until w step stepStep) {
                 val offset = rowOffset + x
                 if (offset >= pixels.size) continue
                 val c = pixels[offset]
-                val r = Color.red(c)
-                val g = Color.green(c)
-                val b = Color.blue(c)
 
-                // Calculate gradient orientation to align brush stroke with image edges
-                val x1 = Math.min(x + 2, w - 1)
-                val y1 = Math.min(y + 2, h - 1)
+                // Simplify / Organize colors into bold oil paint color palette
+                var r = Color.red(c)
+                var g = Color.green(c)
+                var b = Color.blue(c)
+
+                r = (Math.round(r.toFloat() / 255f * colorQuantSteps) * (255 / colorQuantSteps)).coerceIn(0, 255)
+                g = (Math.round(g.toFloat() / 255f * colorQuantSteps) * (255 / colorQuantSteps)).coerceIn(0, 255)
+                b = (Math.round(b.toFloat() / 255f * colorQuantSteps) * (255 / colorQuantSteps)).coerceIn(0, 255)
+
+                // Calculate gradient direction for natural contour brush strokes
+                val x1 = Math.min(x + 3, w - 1)
+                val y1 = Math.min(y + 3, h - 1)
                 val l0 = (r * 2 + g * 5 + b) shr 3
                 val cR = pixels[rowOffset + x1]
                 val cD = pixels[y1 * w + x]
@@ -408,33 +414,35 @@ class RawDevelopmentEngine(private val context: Context) {
                 val dx = (Math.cos(angle.toDouble()) * strokeLen / 2).toFloat()
                 val dy = (Math.sin(angle.toDouble()) * strokeLen / 2).toFloat()
 
-                // Main thick oil paint stroke
+                // Main super-thick oil paint brush stroke
                 strokePaint.color = Color.rgb(r, g, b)
                 strokePaint.strokeWidth = strokeWidth
                 canvas.drawLine(x - dx, y - dy, x + dx, y + dy, strokePaint)
 
-                // Impasto brush highlight sheen on stroke edge
-                strokePaint.color = Color.argb(50, 255, 255, 255)
-                strokePaint.strokeWidth = strokeWidth * 0.22f
-                canvas.drawLine(x - dx - 1.5f, y - dy - 1.5f, x + dx - 1.5f, y + dy - 1.5f, strokePaint)
+                // Impasto oil paint highlight sheen edge
+                strokePaint.color = Color.argb(45, 255, 255, 255)
+                strokePaint.strokeWidth = strokeWidth * 0.25f
+                canvas.drawLine(x - dx - 2f, y - dy - 2f, x + dx - 2f, y + dy - 2f, strokePaint)
             }
         }
         return output
     }
 
-    // 4. ペン画調 (インクスケッチ - Hand-drawn Cross-Hatching Ink Sketch)
+    // 4. ペン画調 (カラーペン画 - 元画像カラー ＋ 暗いハッチング陰影)
     private fun applyCrossHatchPenSketchEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
         val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
-        // Off-white paper canvas background
-        canvas.drawColor(Color.rgb(250, 248, 242))
+        // 1. Draw original photo colors as base
+        canvas.drawBitmap(src, 0f, 0f, paint)
 
-        val step = Math.max(6, (11 * intensity).toInt())
+        // 2. Hatching lines overlay using original photo contrast for shading
+        val step = Math.max(6, (12 * intensity).toInt())
         val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(30, 28, 25)
+            color = Color.argb(220, 25, 22, 20)
             strokeWidth = Math.max(1.2f, 1.8f * intensity)
             style = Paint.Style.STROKE
         }
@@ -469,40 +477,21 @@ class RawDevelopmentEngine(private val context: Context) {
                     val y1 = (y + step).toFloat()
 
                     // Cross Hatching Level 1: Light Shadow (Diagonal ///)
-                    if (avgLum < 210) {
+                    if (avgLum < 200) {
                         canvas.drawLine(x0, y1, x1, y0, strokePaint)
                     }
                     // Cross Hatching Level 2: Medium Shadow (Cross Hatch XXX)
-                    if (avgLum < 150) {
+                    if (avgLum < 140) {
                         canvas.drawLine(x0, y0, x1, y1, strokePaint)
                     }
                     // Cross Hatching Level 3: Deep Shadow (Horizontal lines)
-                    if (avgLum < 95) {
+                    if (avgLum < 85) {
                         canvas.drawLine(x0, y0 + step / 2f, x1, y0 + step / 2f, strokePaint)
                     }
                     // Cross Hatching Level 4: Dense Shadow (Vertical lines)
-                    if (avgLum < 45) {
+                    if (avgLum < 40) {
                         canvas.drawLine(x0 + step / 2f, y0, x0 + step / 2f, y1, strokePaint)
                     }
-                }
-            }
-        }
-
-        // Overlay Edge Outline Lines for sharp Pen Sketch contours
-        val thresh = (20f / intensity).coerceIn(8f, 45f)
-        for (y in 1 until h - 1 step 2) {
-            val offset = y * w
-            for (x in 1 until w - 1 step 2) {
-                val c0 = pixels[offset + x]
-                val cR = pixels[offset + x + 1]
-                val cD = pixels[offset + w + x]
-
-                val l0 = (Color.red(c0) * 2 + Color.green(c0) * 5 + Color.blue(c0)) shr 3
-                val lR = (Color.red(cR) * 2 + Color.green(cR) * 5 + Color.blue(cR)) shr 3
-                val lD = (Color.red(cD) * 2 + Color.green(cD) * 5 + Color.blue(cD)) shr 3
-
-                if (Math.abs(l0 - lR) + Math.abs(l0 - lD) > thresh) {
-                    canvas.drawPoint(x.toFloat(), y.toFloat(), strokePaint)
                 }
             }
         }
