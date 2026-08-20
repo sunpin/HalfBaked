@@ -438,7 +438,7 @@ class RawDevelopmentEngine(private val context: Context) {
         return output
     }
 
-    // 4. ペン画調テスト (大域的マクロ解析 ＋ 物の形に沿う長尺ハッチング描画)
+    // 4. ペン画調テスト (超大粒・超太線のマクロペン画)
     private fun applyCrossHatchPenSketchEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
@@ -451,8 +451,8 @@ class RawDevelopmentEngine(private val context: Context) {
         val pixels = IntArray(w * h)
         src.getPixels(pixels, 0, w, 0, 0, w, h)
 
-        // 大域グリッドサイズ (18px ~ 36px の大きなブロック単位で大域解析)
-        val step = Math.max(18, (34 * intensity).toInt())
+        // 2. 超大粒グリッドサイズ (35px ~ 75px の大きなブロック単位で極めて荒く大域解析)
+        val step = Math.max(35, (75 * intensity).toInt())
         val gridW = (w + step - 1) / step
         val gridH = (h + step - 1) / step
 
@@ -460,7 +460,7 @@ class RawDevelopmentEngine(private val context: Context) {
         val macroSat = FloatArray(gridW * gridH)
         val hsv = FloatArray(3)
 
-        // 大域ブロック平均の計算
+        // 超大域ブロック平均の計算
         for (gy in 0 until gridH) {
             val startY = gy * step
             val endY = Math.min(startY + step, h)
@@ -494,15 +494,15 @@ class RawDevelopmentEngine(private val context: Context) {
             }
         }
 
-        // A. 大域的な太い赤の輪郭線 (赤線 / RED)
+        // A. 超太い赤の輪郭線 (赤線 / RED: strokeWidth 6.0px ~ 13.0px)
         val outlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.RED
-            strokeWidth = Math.max(3.2f, 5.5f * intensity)
+            strokeWidth = Math.max(6.0f, 13.0f * intensity)
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
         }
 
-        val macroEdgeThresh = (25f / intensity).coerceIn(12f, 60f)
+        val macroEdgeThresh = (20f / intensity).coerceIn(10f, 50f)
 
         for (gy in 1 until gridH - 1) {
             val rowOff = gy * gridW
@@ -523,9 +523,9 @@ class RawDevelopmentEngine(private val context: Context) {
                     val cx = (gx + 0.5f) * step
                     val cy = (gy + 0.5f) * step
 
-                    // 勾配と垂直な方向（＝物体の輪郭方向）に太い輪郭線を引く
+                    // 勾配と垂直な方向（＝物体の輪郭方向）に超太い輪郭線を引く
                     val contourAngle = Math.atan2(gyL.toDouble(), gxL.toDouble()).toFloat() + (Math.PI / 2).toFloat()
-                    val lineLen = step * 1.5f
+                    val lineLen = step * 1.6f
                     val dx = (Math.cos(contourAngle.toDouble()) * lineLen / 2).toFloat()
                     val dy = (Math.sin(contourAngle.toDouble()) * lineLen / 2).toFloat()
 
@@ -534,15 +534,15 @@ class RawDevelopmentEngine(private val context: Context) {
             }
         }
 
-        // B. 物の形を意識した長尺ハッチング (青線 / BLUE)
+        // B. 物の形に沿う超太い長尺ハッチング (青線 / BLUE: strokeWidth 4.0px ~ 8.0px)
         val hatchPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLUE
-            strokeWidth = Math.max(2.0f, 3.2f * intensity)
+            strokeWidth = Math.max(4.0f, 8.0f * intensity)
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
         }
 
-        val strokeLen = step * 2.8f // 長く流れるストローク
+        val strokeLen = step * 2.5f
 
         for (gy in 0 until gridH) {
             val rowOff = gy * gridW
@@ -560,16 +560,16 @@ class RawDevelopmentEngine(private val context: Context) {
                     val mag = Math.hypot(gxL.toDouble(), gyL.toDouble()).toFloat()
 
                     // 物体の面の流れに沿う角度 (Form-following angle)
-                    val baseAngle = if (mag > 15f) {
+                    val baseAngle = if (mag > 12f) {
                         Math.atan2(gyL.toDouble(), gxL.toDouble()).toFloat() + (Math.PI / 2).toFloat()
                     } else {
-                        (Math.PI / 4).toFloat() // 平坦な影は45°
+                        (Math.PI / 4).toFloat()
                     }
 
                     val dx = (Math.cos(baseAngle.toDouble()) * strokeLen / 2).toFloat()
                     val dy = (Math.sin(baseAngle.toDouble()) * strokeLen / 2).toFloat()
 
-                    // 主ハッチング（物の形に沿う青線）
+                    // 主ハッチング（物の形に沿う超太い青線）
                     canvas.drawLine(cx - dx, cy - dy, cx + dx, cy + dy, hatchPaint)
 
                     // より濃い陰影 (L < 135) には交差ハッチング
