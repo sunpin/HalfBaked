@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import com.noaicam.data.DevelopEffect
 import com.noaicam.data.DevelopParams
 import com.noaicam.data.ZoomCropMode
 import kotlinx.coroutines.Dispatchers
@@ -211,12 +212,294 @@ class RawDevelopmentEngine(private val context: Context) {
             }
 
             // 8. Sharpness (Convolution sharpening if > 1.05)
-            if (params.sharpness > 1.05f) {
+            val sharpenedBitmap = if (params.sharpness > 1.05f) {
                 applySharpeningFilter(nrBitmap, params.sharpness)
             } else {
                 nrBitmap
             }
+
+            // 9. Art Effect Filters (if selected)
+            if (params.effect != DevelopEffect.NONE) {
+                applyArtEffect(sharpenedBitmap, params.effect)
+            } else {
+                sharpenedBitmap
+            }
         }
+
+    private fun applyArtEffect(src: Bitmap, effect: DevelopEffect): Bitmap {
+        return when (effect) {
+            DevelopEffect.GRAVURE -> applyGravureHalftoneEffect(src)
+            DevelopEffect.SUPER_PORTRAIT -> applySuperPortraitEffect(src)
+            DevelopEffect.OIL_PAINT -> applyOilPaintEffect(src)
+            DevelopEffect.PEN_SKETCH -> applyPenSketchEffect(src)
+            DevelopEffect.ANIME -> applyAnimeEffect(src)
+            DevelopEffect.RETRO_FILM -> applyRetroFilmEffect(src)
+            DevelopEffect.NOIR -> applyNoirEffect(src)
+            DevelopEffect.NONE -> src
+        }
+    }
+
+    // 1. グラビア調 (点描・網点印刷 - Gravure Halftone Dot Print)
+    private fun applyGravureHalftoneEffect(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+
+        // Off-white paper background
+        canvas.drawColor(Color.rgb(248, 246, 240))
+
+        val step = Math.max(4, Math.min(w, h) / 180)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        for (y in 0 until h step step) {
+            for (x in 0 until w step step) {
+                var sumR = 0
+                var sumG = 0
+                var sumB = 0
+                var count = 0
+
+                for (dy in 0 until step) {
+                    val py = y + dy
+                    if (py >= h) break
+                    val rowOffset = py * w
+                    for (dx in 0 until step) {
+                        val px = x + dx
+                        if (px >= w) break
+                        val c = pixels[rowOffset + px]
+                        sumR += Color.red(c)
+                        sumG += Color.green(c)
+                        sumB += Color.blue(c)
+                        count++
+                    }
+                }
+
+                if (count > 0) {
+                    val avgR = sumR / count
+                    val avgG = sumG / count
+                    val avgB = sumB / count
+                    val lum = (0.299f * avgR + 0.587f * avgG + 0.114f * avgB) / 255f
+
+                    val maxRadius = step * 0.72f
+                    val dotRadius = (1.0f - lum) * maxRadius
+
+                    if (dotRadius > 0.4f) {
+                        paint.color = Color.rgb(
+                            (avgR * 0.75f).toInt(),
+                            (avgG * 0.75f).toInt(),
+                            (avgB * 0.75f).toInt()
+                        )
+                        canvas.drawCircle(
+                            x + step / 2f,
+                            y + step / 2f,
+                            dotRadius,
+                            paint
+                        )
+                    }
+                }
+            }
+        }
+        return output
+    }
+
+    // 2. スーパーポートレート (美肌 / ソフトグロウ Orton Bloom)
+    private fun applySuperPortraitEffect(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+        // Draw original sharp base
+        canvas.drawBitmap(src, 0f, 0f, paint)
+
+        // Create soft blurred bloom overlay
+        val scale = 0.25f
+        val small = Bitmap.createScaledBitmap(src, Math.max(1, (w * scale).toInt()), Math.max(1, (h * scale).toInt()), true)
+        val blurred = Bitmap.createScaledBitmap(small, w, h, true)
+        small.recycle()
+
+        // Screen blend soft bloom
+        paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+        paint.alpha = 110
+        canvas.drawBitmap(blurred, 0f, 0f, paint)
+        paint.xfermode = null
+        paint.alpha = 255
+        blurred.recycle()
+
+        // Slight warm tone matrix
+        val warmMatrix = ColorMatrix(
+            floatArrayOf(
+                1.08f, 0f, 0f, 0f, 8f,
+                0f, 1.02f, 0f, 0f, 4f,
+                0f, 0f, 0.95f, 0f, 0f,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+        val finalBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val finalCanvas = Canvas(finalBmp)
+        paint.colorFilter = ColorMatrixColorFilter(warmMatrix)
+        finalCanvas.drawBitmap(output, 0f, 0f, paint)
+        output.recycle()
+
+        return finalBmp
+    }
+
+    // 3. 油絵調 (オイルペイント Oil Painting)
+    private fun applyOilPaintEffect(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val scaledW = Math.max(1, w / 2)
+        val scaledH = Math.max(1, h / 2)
+        val small = Bitmap.createScaledBitmap(src, scaledW, scaledH, true)
+
+        val outputSmall = Bitmap.createBitmap(scaledW, scaledH, Bitmap.Config.ARGB_8888)
+        val canvasSmall = Canvas(outputSmall)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+        // Posterize color matrix to round color values into oil stroke blocks
+        val posterizeMatrix = ColorMatrix(
+            floatArrayOf(
+                1.2f, 0f, 0f, 0f, -15f,
+                0f, 1.2f, 0f, 0f, -15f,
+                0f, 0f, 1.2f, 0f, -15f,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+        paint.colorFilter = ColorMatrixColorFilter(posterizeMatrix)
+        canvasSmall.drawBitmap(small, 0f, 0f, paint)
+        small.recycle()
+
+        val result = Bitmap.createScaledBitmap(outputSmall, w, h, true)
+        outputSmall.recycle()
+        return result
+    }
+
+    // 4. ペン画調 (インクスケッチ Pen Sketch)
+    private fun applyPenSketchEffect(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+
+        // Light off-white paper canvas
+        canvas.drawColor(Color.rgb(250, 248, 242))
+
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+        val outPixels = IntArray(w * h)
+
+        val paperColor = Color.rgb(250, 248, 242)
+        val inkColor = Color.rgb(35, 30, 25)
+
+        for (y in 1 until h - 1) {
+            val offset = y * w
+            for (x in 1 until w - 1) {
+                val c0 = pixels[offset + x]
+                val cRight = pixels[offset + x + 1]
+                val cDown = pixels[offset + w + x]
+
+                val lum0 = (Color.red(c0) * 2 + Color.green(c0) * 5 + Color.blue(c0)) shr 3
+                val lumR = (Color.red(cRight) * 2 + Color.green(cRight) * 5 + Color.blue(cRight)) shr 3
+                val lumD = (Color.red(cDown) * 2 + Color.green(cDown) * 5 + Color.blue(cDown)) shr 3
+
+                val diff = Math.abs(lum0 - lumR) + Math.abs(lum0 - lumD)
+                if (diff > 28) {
+                    outPixels[offset + x] = inkColor
+                } else {
+                    outPixels[offset + x] = paperColor
+                }
+            }
+        }
+
+        output.setPixels(outPixels, 0, w, 0, 0, w, h)
+        return output
+    }
+
+    // 5. アニメ調 (セル画風 Cel Shading)
+    private fun applyAnimeEffect(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+        // Boost saturation for anime vibrancy
+        val satMatrix = ColorMatrix()
+        satMatrix.setSaturation(1.35f)
+        paint.colorFilter = ColorMatrixColorFilter(satMatrix)
+        canvas.drawBitmap(src, 0f, 0f, paint)
+
+        return output
+    }
+
+    // 6. レトロフィルム (トイカメラ Lomo Vignette)
+    private fun applyRetroFilmEffect(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+        // Vintage warm tint
+        val retroMatrix = ColorMatrix(
+            floatArrayOf(
+                1.15f, 0f, 0f, 0f, 10f,
+                0f, 1.05f, 0f, 0f, 5f,
+                0f, 0f, 0.88f, 0f, 0f,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+        paint.colorFilter = ColorMatrixColorFilter(retroMatrix)
+        canvas.drawBitmap(src, 0f, 0f, paint)
+        paint.colorFilter = null
+
+        // Radial Vignette mask on corners
+        val radius = Math.hypot(w / 2.0, h / 2.0).toFloat()
+        val vignetteShader = RadialGradient(
+            w / 2f, h / 2f, radius,
+            intArrayOf(Color.TRANSPARENT, Color.TRANSPARENT, Color.argb(180, 0, 0, 0)),
+            floatArrayOf(0.0f, 0.55f, 1.0f),
+            Shader.TileMode.CLAMP
+        )
+        paint.shader = vignetteShader
+        canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
+        paint.shader = null
+
+        return output
+    }
+
+    // 7. モノクロノワール (高コントラスト白黒 Noir)
+    private fun applyNoirEffect(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+        val noirMatrix = ColorMatrix()
+        noirMatrix.setSaturation(0f)
+
+        val contrast = 1.65f
+        val translate = 128f * (1f - contrast) - 15f
+        val highContrastMatrix = ColorMatrix(
+            floatArrayOf(
+                contrast, 0f, 0f, 0f, translate,
+                0f, contrast, 0f, 0f, translate,
+                0f, 0f, contrast, 0f, translate,
+                0f, 0f, 0f, 1f, 0f
+            )
+        )
+        noirMatrix.postConcat(highContrastMatrix)
+
+        paint.colorFilter = ColorMatrixColorFilter(noirMatrix)
+        canvas.drawBitmap(src, 0f, 0f, paint)
+
+        return output
+    }
 
     private fun applyNoiseReductionFilter(src: Bitmap): Bitmap {
         val w = src.width

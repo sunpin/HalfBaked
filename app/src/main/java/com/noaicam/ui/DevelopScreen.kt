@@ -8,6 +8,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.noaicam.data.DevelopEffect
 import com.noaicam.data.DevelopParams
 import com.noaicam.processor.RawDevelopmentEngine
 import com.noaicam.ui.theme.*
@@ -59,7 +62,7 @@ fun DevelopScreen(
 
     var params by remember { mutableStateOf(DevelopParams()) }
     var lastRenderedParams by remember { mutableStateOf<DevelopParams?>(null) }
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Exposure/WB, 1: Tone/Contrast, 2: Color, 3: Crop/Zoom
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Exposure/WB, 1: Tone/Contrast, 2: Color, 3: Crop/Zoom, 4: Art Effects
 
     // Current live visual transform state (GPU hardware accelerated)
     var visualScale by remember { mutableFloatStateOf(params.cropScale) }
@@ -392,6 +395,11 @@ fun DevelopScreen(
                             onClick = { selectedTab = 3 },
                             text = { Text("トリミング & ズーム", fontSize = 12.sp) }
                         )
+                        Tab(
+                            selected = selectedTab == 4,
+                            onClick = { selectedTab = 4 },
+                            text = { Text("アートエフェクト", fontSize = 12.sp) }
+                        )
                     }
 
                     // Sliders Container
@@ -607,6 +615,50 @@ fun DevelopScreen(
                                     onValueChange = { visualPanY = it },
                                     onReset = { visualPanY = 0f }
                                 )
+                            }
+                            4 -> {
+                                Text(
+                                    text = "アートエフェクト選択",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = RawGold
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    DevelopEffect.values().forEach { eff ->
+                                        val selected = params.effect == eff
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    params = params.copy(effect = eff)
+                                                },
+                                            color = if (selected) RawGold else DarkSurfaceVariant,
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = eff.label,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (selected) Color.Black else TextPrimary
+                                                )
+                                                if (selected) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = Color.Black,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
