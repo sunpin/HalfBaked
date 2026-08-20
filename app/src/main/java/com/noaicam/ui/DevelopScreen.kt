@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -163,80 +164,91 @@ fun DevelopScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                // Photo Canvas Preview Container (Strictly bounded pan/crop with zero-flicker relative GPU transform)
+                // Photo Canvas Preview Container Outer Host
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1.0f)
                         .background(Color.Black)
-                        .clipToBounds()
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                val containerW = size.width.toFloat()
-                                val containerH = size.height.toFloat()
-                                if (containerW <= 0f || containerH <= 0f) return@detectTransformGestures
-
-                                val newScale = (visualScale * zoom).coerceIn(1.0f, 4.0f)
-                                visualScale = newScale
-
-                                if (newScale <= 1.001f) {
-                                    visualScale = 1.0f
-                                    visualPanX = 0.0f
-                                    visualPanY = 0.0f
-                                } else {
-                                    val maxTx = (newScale - 1.0f) * containerW / 2.0f
-                                    val maxTy = (newScale - 1.0f) * containerH / 2.0f
-
-                                    // Natural drag direction (drag right -> photo moves right)
-                                    val currentTx = - visualPanX * maxTx
-                                    val currentTy = - visualPanY * maxTy
-
-                                    val newTx = (currentTx + pan.x).coerceIn(-maxTx, maxTx)
-                                    val newTy = (currentTy + pan.y).coerceIn(-maxTy, maxTy)
-
-                                    visualPanX = if (maxTx > 0f) - newTx / maxTx else 0f
-                                    visualPanY = if (maxTy > 0f) - newTy / maxTy else 0f
-                                }
-                            }
-                        },
+                        .clipToBounds(),
                     contentAlignment = Alignment.Center
                 ) {
                     val displayBmp = if (isRawOriginalView) originalBitmap else developedBitmap
                     displayBmp?.let { bmp ->
-                        Image(
-                            bitmap = bmp.asImageBitmap(),
-                            contentDescription = "RAW Preview",
+                        val bmpAspect = bmp.width.toFloat() / bmp.height.toFloat()
+
+                        // Photo Aspect Ratio Inner Container (Guarantees gesture bounds & GPU transforms match final RAW output 1:1 with ZERO shift)
+                        Box(
                             modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    val rendered = lastRenderedParams ?: params
-                                    val renderedScale = rendered.cropScale.coerceAtLeast(1.0f)
-                                    val relScale = visualScale / renderedScale
+                                .fillMaxHeight()
+                                .aspectRatio(bmpAspect)
+                                .clipToBounds()
+                                .pointerInput(Unit) {
+                                    detectTransformGestures { _, pan, zoom, _ ->
+                                        val boxW = size.width.toFloat()
+                                        val boxH = size.height.toFloat()
+                                        if (boxW <= 0f || boxH <= 0f) return@detectTransformGestures
 
-                                    val containerW = size.width.toFloat()
-                                    val containerH = size.height.toFloat()
+                                        val newScale = (visualScale * zoom).coerceIn(1.0f, 4.0f)
+                                        visualScale = newScale
 
-                                    if (containerW > 0f && containerH > 0f) {
-                                        val renderedMaxTx = (renderedScale - 1.0f) * containerW / 2.0f
-                                        val renderedMaxTy = (renderedScale - 1.0f) * containerH / 2.0f
-                                        val renderedTx = - rendered.cropPanX * renderedMaxTx
-                                        val renderedTy = - rendered.cropPanY * renderedMaxTy
+                                        if (newScale <= 1.001f) {
+                                            visualScale = 1.0f
+                                            visualPanX = 0.0f
+                                            visualPanY = 0.0f
+                                        } else {
+                                            val maxTx = (newScale - 1.0f) * boxW / 2.0f
+                                            val maxTy = (newScale - 1.0f) * boxH / 2.0f
 
-                                        val targetMaxTx = (visualScale - 1.0f) * containerW / 2.0f
-                                        val targetMaxTy = (visualScale - 1.0f) * containerH / 2.0f
-                                        val targetTx = - visualPanX * targetMaxTx
-                                        val targetTy = - visualPanY * targetMaxTy
+                                            // Natural drag direction (drag right -> photo moves right)
+                                            val currentTx = - visualPanX * maxTx
+                                            val currentTy = - visualPanY * maxTy
 
-                                        val relTx = targetTx - (renderedTx * relScale)
-                                        val relTy = targetTy - (renderedTy * relScale)
+                                            val newTx = (currentTx + pan.x).coerceIn(-maxTx, maxTx)
+                                            val newTy = (currentTy + pan.y).coerceIn(-maxTy, maxTy)
 
-                                        scaleX = relScale
-                                        scaleY = relScale
-                                        translationX = relTx
-                                        translationY = relTy
+                                            visualPanX = if (maxTx > 0f) - newTx / maxTx else 0f
+                                            visualPanY = if (maxTy > 0f) - newTy / maxTy else 0f
+                                        }
                                     }
                                 }
-                        )
+                        ) {
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = "RAW Preview",
+                                contentScale = ContentScale.FillBounds,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        val rendered = lastRenderedParams ?: params
+                                        val renderedScale = rendered.cropScale.coerceAtLeast(1.0f)
+                                        val relScale = visualScale / renderedScale
+
+                                        val boxW = size.width.toFloat()
+                                        val boxH = size.height.toFloat()
+
+                                        if (boxW > 0f && boxH > 0f) {
+                                            val renderedMaxTx = (renderedScale - 1.0f) * boxW / 2.0f
+                                            val renderedMaxTy = (renderedScale - 1.0f) * boxH / 2.0f
+                                            val renderedTx = - rendered.cropPanX * renderedMaxTx
+                                            val renderedTy = - rendered.cropPanY * renderedMaxTy
+
+                                            val targetMaxTx = (visualScale - 1.0f) * boxW / 2.0f
+                                            val targetMaxTy = (visualScale - 1.0f) * boxH / 2.0f
+                                            val targetTx = - visualPanX * targetMaxTx
+                                            val targetTy = - visualPanY * targetMaxTy
+
+                                            val relTx = targetTx - (renderedTx * relScale)
+                                            val relTy = targetTy - (renderedTy * relScale)
+
+                                            scaleX = relScale
+                                            scaleY = relScale
+                                            translationX = relTx
+                                            translationY = relTy
+                                        }
+                                    }
+                            )
+                        }
                     }
 
                     // Compare Toggle Overlay Button (Original vs Developed)
