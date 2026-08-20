@@ -6,8 +6,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.calculatePan
-import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -35,6 +34,7 @@ import com.noaicam.data.DevelopParams
 import com.noaicam.processor.RawDevelopmentEngine
 import com.noaicam.ui.theme.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -57,13 +57,13 @@ fun DevelopScreen(
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
     var params by remember { mutableStateOf(DevelopParams()) }
+    var lastRenderedParams by remember { mutableStateOf<DevelopParams?>(null) }
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Exposure/WB, 1: Tone/Contrast, 2: Color, 3: Crop/Zoom
 
-    // Real-time GPU Transformation states during finger dragging/pinching
-    var isTransforming by remember { mutableStateOf(false) }
-    var liveGestureScale by remember { mutableFloatStateOf(1.0f) }
-    var liveTranslationX by remember { mutableFloatStateOf(0.0f) }
-    var liveTranslationY by remember { mutableFloatStateOf(0.0f) }
+    // Current live visual transform state (GPU hardware accelerated)
+    var visualScale by remember { mutableFloatStateOf(params.cropScale) }
+    var visualPanX by remember { mutableFloatStateOf(params.cropPanX) }
+    var visualPanY by remember { mutableFloatStateOf(params.cropPanY) }
 
     // Load RAW image
     LaunchedEffect(dngFilePath) {
@@ -71,15 +71,29 @@ fun DevelopScreen(
         val bmp = rawEngine.decodeRawToBitmap(dngFilePath)
         originalBitmap = bmp
         if (bmp != null) {
-            developedBitmap = rawEngine.processBitmap(bmp, params)
+            val rendered = rawEngine.processBitmap(bmp, params)
+            developedBitmap = rendered
+            lastRenderedParams = params
         }
         isLoading = false
     }
 
-    // Re-render RAW bitmap when parameters change
+    // Debounced update to params so active touch gestures smoothly animate without triggering heavy RAW decodes during touch
+    LaunchedEffect(visualScale, visualPanX, visualPanY) {
+        delay(150)
+        params = params.copy(
+            cropScale = visualScale,
+            cropPanX = visualPanX,
+            cropPanY = visualPanY
+        )
+    }
+
+    // Re-render RAW bitmap when params change
     LaunchedEffect(params, originalBitmap) {
         val base = originalBitmap ?: return@LaunchedEffect
-        developedBitmap = rawEngine.processBitmap(base, params)
+        val rendered = rawEngine.processBitmap(base, params)
+        developedBitmap = rendered
+        lastRenderedParams = params
     }
 
     Scaffold(
@@ -149,57 +163,39 @@ fun DevelopScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                // Photo Canvas Preview Container (Instant GPU transformation during touch, Re-render RAW on finger release)
+                // Photo Canvas Preview Container (Strictly bounded pan/crop with zero-flicker relative GPU transform)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1.0f)
                         .background(Color.Black)
                         .clipToBounds()
-                        .pointerInput(params) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val changes = event.changes
-                                    val downCount = changes.count { it.pressed }
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                val containerW = size.width.toFloat()
+                                val containerH = size.height.toFloat()
+                                if (containerW <= 0f || containerH <= 0f) return@detectTransformGestures
 
-                                    if (downCount > 0) {
-                                        // User is active dragging/pinching on image
-                                        val pan = event.calculatePan()
-                                        val zoom = event.calculateZoom()
+                                val newScale = (visualScale * zoom).coerceIn(1.0f, 4.0f)
+                                visualScale = newScale
 
-                                        if (pan != Offset.Zero || zoom != 1.0f) {
-                                            isTransforming = true
-                                            liveGestureScale = (liveGestureScale * zoom).coerceIn(0.7f, 5.0f)
-                                            liveTranslationX += pan.x
-                                            liveTranslationY += pan.y
-                                        }
-                                        changes.forEach { it.consume() }
-                                    } else if (isTransforming) {
-                                        // Finger released! Commit final pan & zoom to params and trigger RAW re-render
-                                        val containerW = size.width.toFloat()
-                                        val containerH = size.height.toFloat()
+                                if (newScale <= 1.001f) {
+                                    visualScale = 1.0f
+                                    visualPanX = 0.0f
+                                    visualPanY = 0.0f
+                                } else {
+                                    val maxTx = (newScale - 1.0f) * containerW / 2.0f
+                                    val maxTy = (newScale - 1.0f) * containerH / 2.0f
 
-                                        val finalScale = (params.cropScale * liveGestureScale).coerceIn(1.0f, 4.0f)
+                                    // Natural drag direction (drag right -> photo moves right)
+                                    val currentTx = - visualPanX * maxTx
+                                    val currentTy = - visualPanY * maxTy
 
-                                        // Natural drag direction (inverted sign)
-                                        val panXFactor = if (containerW > 0) 2.0f / (containerW * params.cropScale) else 0.003f
-                                        val panYFactor = if (containerH > 0) 2.0f / (containerH * params.cropScale) else 0.003f
+                                    val newTx = (currentTx + pan.x).coerceIn(-maxTx, maxTx)
+                                    val newTy = (currentTy + pan.y).coerceIn(-maxTy, maxTy)
 
-                                        val newPanX = (params.cropPanX - liveTranslationX * panXFactor).coerceIn(-1.0f, 1.0f)
-                                        val newPanY = (params.cropPanY - liveTranslationY * panYFactor).coerceIn(-1.0f, 1.0f)
-
-                                        isTransforming = false
-                                        liveGestureScale = 1.0f
-                                        liveTranslationX = 0.0f
-                                        liveTranslationY = 0.0f
-
-                                        params = params.copy(
-                                            cropScale = finalScale,
-                                            cropPanX = newPanX,
-                                            cropPanY = newPanY
-                                        )
-                                    }
+                                    visualPanX = if (maxTx > 0f) - newTx / maxTx else 0f
+                                    visualPanY = if (maxTy > 0f) - newTy / maxTy else 0f
                                 }
                             }
                         },
@@ -213,11 +209,31 @@ fun DevelopScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer {
-                                    if (isTransforming) {
-                                        scaleX = liveGestureScale
-                                        scaleY = liveGestureScale
-                                        translationX = liveTranslationX
-                                        translationY = liveTranslationY
+                                    val rendered = lastRenderedParams ?: params
+                                    val renderedScale = rendered.cropScale.coerceAtLeast(1.0f)
+                                    val relScale = visualScale / renderedScale
+
+                                    val containerW = size.width.toFloat()
+                                    val containerH = size.height.toFloat()
+
+                                    if (containerW > 0f && containerH > 0f) {
+                                        val renderedMaxTx = (renderedScale - 1.0f) * containerW / 2.0f
+                                        val renderedMaxTy = (renderedScale - 1.0f) * containerH / 2.0f
+                                        val renderedTx = - rendered.cropPanX * renderedMaxTx
+                                        val renderedTy = - rendered.cropPanY * renderedMaxTy
+
+                                        val targetMaxTx = (visualScale - 1.0f) * containerW / 2.0f
+                                        val targetMaxTy = (visualScale - 1.0f) * containerH / 2.0f
+                                        val targetTx = - visualPanX * targetMaxTx
+                                        val targetTy = - visualPanY * targetMaxTy
+
+                                        val relTx = targetTx - (renderedTx * relScale)
+                                        val relTy = targetTy - (renderedTy * relScale)
+
+                                        scaleX = relScale
+                                        scaleY = relScale
+                                        translationX = relTx
+                                        translationY = relTy
                                     }
                                 }
                         )
@@ -320,9 +336,14 @@ fun DevelopScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        DevelopPresetChip("全リセット") { params = DevelopParams() }
-                        DevelopPresetChip("ナチュラル") { params = DevelopParams(contrast = 1.1f, saturation = 1.05f) }
-                        DevelopPresetChip("フィルム") { params = DevelopParams(isWbAuto = false, temperature = 6500f, contrast = 1.15f, saturation = 1.1f) }
+                        DevelopPresetChip("全リセット") {
+                            visualScale = 1.0f
+                            visualPanX = 0f
+                            visualPanY = 0f
+                            params = DevelopParams()
+                        }
+                        DevelopPresetChip("ナチュラル") { params = params.copy(contrast = 1.1f, saturation = 1.05f) }
+                        DevelopPresetChip("フィルム") { params = params.copy(isWbAuto = false, temperature = 6500f, contrast = 1.15f, saturation = 1.1f) }
                     }
                 }
 
@@ -495,29 +516,42 @@ fun DevelopScreen(
                             3 -> {
                                 DevelopSliderControl(
                                     label = "ズーム・トリミング倍率",
-                                    valueDisplay = "%.2fx".format(params.cropScale),
-                                    value = params.cropScale,
+                                    valueDisplay = "%.2fx".format(visualScale),
+                                    value = visualScale,
                                     valueRange = 1.0f..4.0f,
-                                    onValueChange = { params = params.copy(cropScale = it) },
-                                    onReset = { params = params.copy(cropScale = 1.0f, cropPanX = 0f, cropPanY = 0f) }
+                                    onValueChange = {
+                                        visualScale = it
+                                        if (it <= 1.001f) {
+                                            visualPanX = 0f
+                                            visualPanY = 0f
+                                        } else {
+                                            visualPanX = visualPanX.coerceIn(-1.0f, 1.0f)
+                                            visualPanY = visualPanY.coerceIn(-1.0f, 1.0f)
+                                        }
+                                    },
+                                    onReset = {
+                                        visualScale = 1.0f
+                                        visualPanX = 0f
+                                        visualPanY = 0f
+                                    }
                                 )
                                 Spacer(modifier = Modifier.height(12.dp))
                                 DevelopSliderControl(
                                     label = "左右位置 (Pan X)",
-                                    valueDisplay = if (params.cropPanX >= 0) "+%.2f".format(params.cropPanX) else "%.2f".format(params.cropPanX),
-                                    value = params.cropPanX,
+                                    valueDisplay = if (visualPanX >= 0) "+%.2f".format(visualPanX) else "%.2f".format(visualPanX),
+                                    value = visualPanX,
                                     valueRange = -1.0f..1.0f,
-                                    onValueChange = { params = params.copy(cropPanX = it) },
-                                    onReset = { params = params.copy(cropPanX = 0f) }
+                                    onValueChange = { visualPanX = it },
+                                    onReset = { visualPanX = 0f }
                                 )
                                 Spacer(modifier = Modifier.height(12.dp))
                                 DevelopSliderControl(
                                     label = "上下位置 (Pan Y)",
-                                    valueDisplay = if (params.cropPanY >= 0) "+%.2f".format(params.cropPanY) else "%.2f".format(params.cropPanY),
-                                    value = params.cropPanY,
+                                    valueDisplay = if (visualPanY >= 0) "+%.2f".format(visualPanY) else "%.2f".format(visualPanY),
+                                    value = visualPanY,
                                     valueRange = -1.0f..1.0f,
-                                    onValueChange = { params = params.copy(cropPanY = it) },
-                                    onReset = { params = params.copy(cropPanY = 0f) }
+                                    onValueChange = { visualPanY = it },
+                                    onReset = { visualPanY = 0f }
                                 )
                             }
                         }
