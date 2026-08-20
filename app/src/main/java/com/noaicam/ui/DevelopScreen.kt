@@ -68,6 +68,7 @@ fun DevelopScreen(
     var visualScale by remember { mutableFloatStateOf(params.cropScale) }
     var visualPanX by remember { mutableFloatStateOf(params.cropPanX) }
     var visualPanY by remember { mutableFloatStateOf(params.cropPanY) }
+    var visualEffectIntensity by remember { mutableFloatStateOf(params.effectIntensity) }
 
     // Load RAW image
     LaunchedEffect(dngFilePath) {
@@ -82,13 +83,14 @@ fun DevelopScreen(
         isLoading = false
     }
 
-    // Debounced update to params so active touch gestures smoothly animate without triggering heavy RAW decodes during touch
-    LaunchedEffect(visualScale, visualPanX, visualPanY) {
-        delay(150)
+    // Debounced update to params so active touch gestures and slider drags smoothly animate without triggering heavy RAW decodes during touch
+    LaunchedEffect(visualScale, visualPanX, visualPanY, visualEffectIntensity) {
+        delay(200)
         params = params.copy(
             cropScale = visualScale,
             cropPanX = visualPanX,
-            cropPanY = visualPanY
+            cropPanY = visualPanY,
+            effectIntensity = visualEffectIntensity
         )
     }
 
@@ -355,6 +357,7 @@ fun DevelopScreen(
                             visualScale = 1.0f
                             visualPanX = 0f
                             visualPanY = 0f
+                            visualEffectIntensity = 1.0f
                             params = DevelopParams()
                         }
                         DevelopPresetChip("ナチュラル") { params = params.copy(contrast = 1.1f, saturation = 1.05f) }
@@ -664,11 +667,14 @@ fun DevelopScreen(
                                     Spacer(modifier = Modifier.height(16.dp))
                                     DevelopSliderControl(
                                         label = "エフェクト強度・タッチサイズ",
-                                        valueDisplay = "%.2fx".format(params.effectIntensity),
-                                        value = params.effectIntensity,
+                                        valueDisplay = "%.2fx".format(visualEffectIntensity),
+                                        value = visualEffectIntensity,
                                         valueRange = 0.2f..2.0f,
-                                        onValueChange = { params = params.copy(effectIntensity = it) },
-                                        onReset = { params = params.copy(effectIntensity = 1.0f) }
+                                        onValueChange = { visualEffectIntensity = it },
+                                        onReset = {
+                                            visualEffectIntensity = 1.0f
+                                            params = params.copy(effectIntensity = 1.0f)
+                                        }
                                     )
                                 }
                             }
