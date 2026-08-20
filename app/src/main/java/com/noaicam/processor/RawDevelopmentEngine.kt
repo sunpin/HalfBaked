@@ -438,48 +438,29 @@ class RawDevelopmentEngine(private val context: Context) {
         return output
     }
 
-    // 4. ペン画調 (カラーペン画 - 長い流線型ペン線による斜めハッチング ＋ クッキリ太い黒輪郭線)
+    // 4. テスト用ペン画調 (背景：真っ白, 輪郭：赤, ハッチング：青)
     private fun applyCrossHatchPenSketchEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
         val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
-        // 1. Soft blurred color wash base preserving original HUE & SATURATION
+        // 1. テスト下地：全部真っ白 (Pure White)
+        canvas.drawColor(Color.WHITE)
+
         val pixels = IntArray(w * h)
         src.getPixels(pixels, 0, w, 0, 0, w, h)
-        val basePixels = IntArray(w * h)
-        val hsv = FloatArray(3)
 
-        for (i in pixels.indices) {
-            val c = pixels[i]
-            Color.colorToHSV(c, hsv)
-            hsv[2] = 0.88f // High uniform Value for soft watercolor wash
-            basePixels[i] = Color.HSVToColor(hsv)
-        }
-
-        val baseBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        baseBmp.setPixels(basePixels, 0, w, 0, 0, w, h)
-
-        val scale = 0.5f
-        val small = Bitmap.createScaledBitmap(baseBmp, Math.max(1, (w * scale).toInt()), Math.max(1, (h * scale).toInt()), true)
-        val blurredBase = Bitmap.createScaledBitmap(small, w, h, true)
-        small.recycle()
-        baseBmp.recycle()
-
-        canvas.drawBitmap(blurredBase, 0f, 0f, paint)
-        blurredBase.recycle()
-
-        // 2. BOLD BLACK CONTOUR OUTLINES (色味・明度が変わる境界にクッキリ黒線を引く)
+        // 2. 輪郭：赤 (Color.RED) — 判定を緩くしてより広範囲に輪郭線を引く
         val outlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.BLACK
-            strokeWidth = Math.max(2.2f, 3.8f * intensity)
+            color = Color.RED
+            strokeWidth = Math.max(2.5f, 4.0f * intensity)
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
         }
 
-        val edgeThresh = (24f / intensity).coerceIn(10f, 50f)
+        // 超高感度の輪郭判定しきい値
+        val edgeThresh = (10f / intensity).coerceIn(4f, 25f)
         val outlineBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val outlineCanvas = Canvas(outlineBmp)
 
@@ -500,26 +481,27 @@ class RawDevelopmentEngine(private val context: Context) {
 
                 val diffLum = Math.abs(lum0 - lumR) + Math.abs(lum0 - lumD)
 
-                if (diffColorR + diffColorD > edgeThresh * 2.5f || diffLum > edgeThresh) {
+                if (diffColorR + diffColorD > edgeThresh * 1.8f || diffLum > edgeThresh) {
                     outlineCanvas.drawCircle(x.toFloat(), y.toFloat(), outlinePaint.strokeWidth / 2.0f, outlinePaint)
                 }
             }
         }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         canvas.drawBitmap(outlineBmp, 0f, 0f, paint)
         outlineBmp.recycle()
 
-        // 3. LONG CONTINUOUS DIAGONAL HATCHING PEN STROKES (長めの連写ペン線でハッチング)
+        // 3. ハッチング：青 (Color.BLUE) — 斜め長ストローク
         val hatchPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(235, 20, 20, 20)
+            color = Color.BLUE
             strokeWidth = Math.max(1.3f, 2.0f * intensity)
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
         }
 
         val spacing = Math.max(7, (14 * intensity).toInt())
-        val minStrokeLen = Math.max(15, (w * 0.06f * intensity).toInt()) // Long stroke threshold!
+        val minStrokeLen = Math.max(15, (w * 0.06f * intensity).toInt())
 
-        // Pass 1: Primary Long Diagonal Hatching (/ direction, angle +45 deg)
+        // Pass 1: 主ハッチング (/ 方向, 青線)
         var diag = -h
         while (diag < w + h) {
             var x = diag
@@ -532,7 +514,7 @@ class RawDevelopmentEngine(private val context: Context) {
                     val c = pixels[y * w + x]
                     val lum = (Color.red(c) * 2 + Color.green(c) * 5 + Color.blue(c)) shr 3
 
-                    if (lum < 215) { // Broad shadow coverage
+                    if (lum < 215) {
                         if (strokeStartX < 0) {
                             strokeStartX = x.toFloat()
                             strokeStartY = y.toFloat()
@@ -564,7 +546,7 @@ class RawDevelopmentEngine(private val context: Context) {
             diag += spacing
         }
 
-        // Pass 2: Secondary Long Intersecting Diagonal Hatching (\ direction, angle -45 deg) for deeper shadows
+        // Pass 2: 交差ハッチング (\ 方向, 青線)
         diag = -h
         while (diag < w + h) {
             var x = diag
@@ -577,7 +559,7 @@ class RawDevelopmentEngine(private val context: Context) {
                     val c = pixels[y * w + x]
                     val lum = (Color.red(c) * 2 + Color.green(c) * 5 + Color.blue(c)) shr 3
 
-                    if (lum < 150) { // Deeper shadow coverage
+                    if (lum < 150) {
                         if (strokeStartX < 0) {
                             strokeStartX = x.toFloat()
                             strokeStartY = y.toFloat()
@@ -607,34 +589,6 @@ class RawDevelopmentEngine(private val context: Context) {
                 canvas.drawLine(strokeStartX, strokeStartY, (x - 1).toFloat(), (y + 1).toFloat(), hatchPaint)
             }
             diag += spacing
-        }
-
-        // Pass 3: Long Horizontal Hatching (--- direction) for deepest shadows
-        for (y in 0 until h step (spacing * 1.25).toInt()) {
-            val rowOffset = y * w
-            var strokeStartX = -1f
-
-            for (x in 0 until w) {
-                val c = pixels[rowOffset + x]
-                val lum = (Color.red(c) * 2 + Color.green(c) * 5 + Color.blue(c)) shr 3
-
-                if (lum < 90) { // Deep shadow
-                    if (strokeStartX < 0) {
-                        strokeStartX = x.toFloat()
-                    }
-                } else {
-                    if (strokeStartX >= 0) {
-                        val len = x - strokeStartX
-                        if (len >= minStrokeLen) {
-                            canvas.drawLine(strokeStartX, y.toFloat(), (x - 1).toFloat(), y.toFloat(), hatchPaint)
-                        }
-                        strokeStartX = -1f
-                    }
-                }
-            }
-            if (strokeStartX >= 0) {
-                canvas.drawLine(strokeStartX, y.toFloat(), (w - 1).toFloat(), y.toFloat(), hatchPaint)
-            }
         }
 
         return output
