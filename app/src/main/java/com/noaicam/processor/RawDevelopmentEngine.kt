@@ -438,7 +438,7 @@ class RawDevelopmentEngine(private val context: Context) {
         return output
     }
 
-    // 4. ペン画調テスト (超大粒・超太線のマクロペン画)
+    // 4. ペン画調テスト (極太・長尺の連続輪郭パス線 ＋ 物の形に沿う長尺ハッチング)
     private fun applyCrossHatchPenSketchEffect(src: Bitmap, intensity: Float): Bitmap {
         val w = src.width
         val h = src.height
@@ -451,90 +451,115 @@ class RawDevelopmentEngine(private val context: Context) {
         val pixels = IntArray(w * h)
         src.getPixels(pixels, 0, w, 0, 0, w, h)
 
-        // 2. 超大粒グリッドサイズ (35px ~ 75px の大きなブロック単位で極めて荒く大域解析)
-        val step = Math.max(35, (75 * intensity).toInt())
-        val gridW = (w + step - 1) / step
-        val gridH = (h + step - 1) / step
+        // ダウンサンプルマップで滑らかな大域エッジを抽出 (1/4 スケール)
+        val scaleFactor = 4
+        val dw = Math.max(1, w / scaleFactor)
+        val dh = Math.max(1, h / scaleFactor)
 
-        val macroLum = IntArray(gridW * gridH)
-        val macroSat = FloatArray(gridW * gridH)
+        val dLum = IntArray(dw * dh)
+        val dSat = FloatArray(dw * dh)
         val hsv = FloatArray(3)
 
-        // 超大域ブロック平均の計算
-        for (gy in 0 until gridH) {
-            val startY = gy * step
-            val endY = Math.min(startY + step, h)
-            val rowOffset = gy * gridW
+        for (gy in 0 until dh) {
+            val sy = gy * scaleFactor
+            val dRow = gy * dw
+            for (gx in 0 until dw) {
+                val sx = gx * scaleFactor
+                val c = pixels[sy * w + sx]
+                dLum[dRow + gx] = (Color.red(c) * 2 + Color.green(c) * 5 + Color.blue(c)) shr 3
 
-            for (gx in 0 until gridW) {
-                val startX = gx * step
-                val endX = Math.min(startX + step, w)
-
-                var sumL = 0
-                var sumS = 0f
-                var count = 0
-
-                for (y in startY until endY) {
-                    val pRow = y * w
-                    for (x in startX until endX) {
-                        val c = pixels[pRow + x]
-                        val l = (Color.red(c) * 2 + Color.green(c) * 5 + Color.blue(c)) shr 3
-                        sumL += l
-
-                        Color.colorToHSV(c, hsv)
-                        sumS += hsv[1]
-                        count++
-                    }
-                }
-
-                if (count > 0) {
-                    macroLum[rowOffset + gx] = sumL / count
-                    macroSat[rowOffset + gx] = sumS / count
-                }
+                Color.colorToHSV(c, hsv)
+                dSat[dRow + gx] = hsv[1]
             }
         }
 
-        // A. 超太い赤の輪郭線 (赤線 / RED: strokeWidth 6.0px ~ 13.0px)
+        // 大域勾配の計算
+        val gxL = FloatArray(dw * dh)
+        val gyL = FloatArray(dw * dh)
+        val mag = FloatArray(dw * dh)
+
+        for (y in 1 until dh - 1) {
+            val rowOff = y * dw
+            for (x in 1 until dw - 1) {
+                val idx = rowOff + x
+                val gX = (dLum[idx + 1] - dLum[idx - 1]).toFloat()
+                val gY = (dLum[idx + dw] - dLum[idx - dw]).toFloat()
+                gxL[idx] = gX
+                gyL[idx] = gY
+                mag[idx] = Math.hypot(gX.toDouble(), gY.toDouble()).toFloat()
+            }
+        }
+
+        // A. 連続追跡による超長尺・超極太の赤輪郭線 (RED: strokeWidth 8.0px ~ 18.0px)
         val outlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.RED
-            strokeWidth = Math.max(6.0f, 13.0f * intensity)
+            strokeWidth = Math.max(8.0f, 18.0f * intensity) // 本当に超極太！
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
         }
 
-        val macroEdgeThresh = (20f / intensity).coerceIn(10f, 50f)
+        val edgeThresh = (20f / intensity).coerceIn(10f, 50f)
+        val visited = BooleanArray(dw * dh)
+        val minContourLen = 3 // 連続した長いパスのみ描画
 
-        for (gy in 1 until gridH - 1) {
-            val rowOff = gy * gridW
-            for (gx in 1 until gridW - 1) {
-                val idx = rowOff + gx
+        for (y in 2 until dh - 2) {
+            val rowOff = y * dw
+            for (x in 2 until dw - 2) {
+                val idx = rowOff + x
+                if (!visited[idx] && mag[idx] > edgeThresh) {
+                    // エッジ接線方向に沿って、長尺の連続輪郭パスを追跡生成
+                    val path = Path()
+                    var currX = x
+                    var currY = y
+                    var pathPointCount = 0
 
-                val gxL = (macroLum[idx + 1] - macroLum[idx - 1]).toFloat()
-                val gyL = (macroLum[idx + gridW] - macroLum[idx - gridW]).toFloat()
-                val magL = Math.hypot(gxL.toDouble(), gyL.toDouble()).toFloat()
+                    val startPx = (currX * scaleFactor + scaleFactor / 2).toFloat()
+                    val startPy = (currY * scaleFactor + scaleFactor / 2).toFloat()
+                    path.moveTo(startPx, startPy)
 
-                val gxS = (macroSat[idx + 1] - macroSat[idx - 1]) * 255f
-                val gyS = (macroSat[idx + gridW] - macroSat[idx - gridW]) * 255f
-                val magS = Math.hypot(gxS.toDouble(), gyS.toDouble()).toFloat()
+                    while (currX in 2 until dw - 2 && currY in 2 until dh - 2) {
+                        val cIdx = currY * dw + currX
+                        if (visited[cIdx] || mag[cIdx] <= edgeThresh * 0.65f) break
 
-                val totalMag = Math.max(magL, magS)
+                        visited[cIdx] = true
+                        pathPointCount++
 
-                if (totalMag > macroEdgeThresh) {
-                    val cx = (gx + 0.5f) * step
-                    val cy = (gy + 0.5f) * step
+                        val gX = gxL[cIdx]
+                        val gY = gyL[cIdx]
+                        val m = mag[cIdx]
+                        if (m < 0.1f) break
 
-                    // 勾配と垂直な方向（＝物体の輪郭方向）に超太い輪郭線を引く
-                    val contourAngle = Math.atan2(gyL.toDouble(), gxL.toDouble()).toFloat() + (Math.PI / 2).toFloat()
-                    val lineLen = step * 1.6f
-                    val dx = (Math.cos(contourAngle.toDouble()) * lineLen / 2).toFloat()
-                    val dy = (Math.sin(contourAngle.toDouble()) * lineLen / 2).toFloat()
+                        // 接線方向（輪郭に沿うベクトル）
+                        val tanX = -gY / m
+                        val tanY = gX / m
 
-                    canvas.drawLine(cx - dx, cy - dy, cx + dx, cy + dy, outlinePaint)
+                        var nextX = Math.round(currX + tanX).toInt()
+                        var nextY = Math.round(currY + tanY).toInt()
+
+                        if (nextX == currX && nextY == currY) {
+                            nextX += if (tanX >= 0) 1 else -1
+                            nextY += if (tanY >= 0) 1 else -1
+                        }
+
+                        if (nextX == currX && nextY == currY) break
+
+                        val nextPx = (nextX * scaleFactor + scaleFactor / 2).toFloat()
+                        val nextPy = (nextY * scaleFactor + scaleFactor / 2).toFloat()
+                        path.lineTo(nextPx, nextPy)
+
+                        currX = nextX
+                        currY = nextY
+                    }
+
+                    if (pathPointCount >= minContourLen) {
+                        canvas.drawPath(path, outlinePaint)
+                    }
                 }
             }
         }
 
-        // B. 物の形に沿う超太い長尺ハッチング (青線 / BLUE: strokeWidth 4.0px ~ 8.0px)
+        // B. 物の形に沿う長尺ハッチング (青線 / BLUE: strokeWidth 4.0px ~ 8.0px)
         val hatchPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLUE
             strokeWidth = Math.max(4.0f, 8.0f * intensity)
@@ -542,26 +567,28 @@ class RawDevelopmentEngine(private val context: Context) {
             strokeCap = Paint.Cap.ROUND
         }
 
-        val strokeLen = step * 2.5f
+        val step = Math.max(30, (60 * intensity).toInt())
+        val strokeLen = step * 2.8f
 
-        for (gy in 0 until gridH) {
-            val rowOff = gy * gridW
-            for (gx in 0 until gridW) {
-                val idx = rowOff + gx
-                val l = macroLum[idx]
+        for (gy in 0 until dh step (step / scaleFactor).coerceAtLeast(1)) {
+            val y = gy * scaleFactor
+            if (y >= h) break
+            for (gx in 0 until dw step (step / scaleFactor).coerceAtLeast(1)) {
+                val x = gx * scaleFactor
+                if (x >= w) break
+                val idx = gy * dw + gx
+                val l = dLum[idx]
 
                 if (l < 215) { // 陰影領域
-                    val cx = (gx + 0.5f) * step
-                    val cy = (gy + 0.5f) * step
+                    val cx = x + scaleFactor / 2f
+                    val cy = y + scaleFactor / 2f
 
-                    // 近傍の大域勾配から「物体の面の曲がり（輪郭方向）」を計算
-                    val gxL = if (gx > 0 && gx < gridW - 1) (macroLum[idx + 1] - macroLum[idx - 1]).toFloat() else 0f
-                    val gyL = if (gy > 0 && gy < gridH - 1) (macroLum[idx + gridW] - macroLum[idx - gridW]).toFloat() else 0f
-                    val mag = Math.hypot(gxL.toDouble(), gyL.toDouble()).toFloat()
+                    val gX = gxL[idx]
+                    val gY = gyL[idx]
+                    val m = mag[idx]
 
-                    // 物体の面の流れに沿う角度 (Form-following angle)
-                    val baseAngle = if (mag > 12f) {
-                        Math.atan2(gyL.toDouble(), gxL.toDouble()).toFloat() + (Math.PI / 2).toFloat()
+                    val baseAngle = if (m > 10f) {
+                        Math.atan2(gY.toDouble(), gX.toDouble()).toFloat() + (Math.PI / 2).toFloat()
                     } else {
                         (Math.PI / 4).toFloat()
                     }
@@ -569,10 +596,8 @@ class RawDevelopmentEngine(private val context: Context) {
                     val dx = (Math.cos(baseAngle.toDouble()) * strokeLen / 2).toFloat()
                     val dy = (Math.sin(baseAngle.toDouble()) * strokeLen / 2).toFloat()
 
-                    // 主ハッチング（物の形に沿う超太い青線）
                     canvas.drawLine(cx - dx, cy - dy, cx + dx, cy + dy, hatchPaint)
 
-                    // より濃い陰影 (L < 135) には交差ハッチング
                     if (l < 135) {
                         val crossAngle = baseAngle + (Math.PI / 3).toFloat()
                         val cdx = (Math.cos(crossAngle.toDouble()) * strokeLen / 2).toFloat()
